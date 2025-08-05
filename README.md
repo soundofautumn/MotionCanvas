@@ -29,7 +29,7 @@ CUHK & Adobe Research
 
 |Model|Resolution|GPU Mem. & Inference Time (A100, ddim 50steps)|Checkpoint|
 |:---------|:---------|:--------|:--------|
-|MotionCanvas|832x480| -|[Hugging Face]()|
+|MotionCanvas|832x480| -|[ModelScope](https://www.modelscope.cn/models/doubiiu/MotionCanvas/files)|
 
 Download the pre-trained [Wan2.1-Fun-1.3B-InP](https://modelscope.cn/models/PAI/Wan2.1-Fun-1.3B-InP) model weights and our pre-trained weights.
 This re-implementation of MotionCanvas supports generating videos of up to 49 frames with a resolution of 832x480. The inference time can be reduced by using fewer denoising steps.
