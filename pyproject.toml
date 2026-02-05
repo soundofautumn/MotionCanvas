@@ -1,0 +1,62 @@
+[project]
+name = "diffsynth"
+version = "1.1.7"
+description = "Enjoy the magic of Diffusion models!"
+readme = "README.md"
+requires-python = ">=3.8"
+authors = [
+    {name = "Artiprocher"}
+]
+license = {text = "Apache-2.0"}
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+]
+
+dependencies = [
+    "torch>=2.0.0",
+    "torchvision>=0.15.0",
+    "torchaudio>=2.0.0",
+    "numpy>=1.21.0",
+    "Pillow>=9.0.0",
+    "transformers>=4.30.0",
+    "diffusers>=0.21.0",
+    "accelerate>=0.20.0",
+    "safetensors>=0.3.0",
+    "omegaconf>=2.3.0",
+    "tqdm>=4.65.0",
+    "lightning>=2.0.0",
+    "peft>=0.5.0",
+    "modelscope>=1.9.0",
+    "gradio>=4.0.0",
+    "streamlit>=1.28.0",
+    "opencv-python>=4.8.0",
+    "scipy>=1.10.0",
+    "einops>=0.7.0",
+    "xformers>=0.0.20; platform_system != 'Windows'",
+    "imageio>=2.25.0",
+    "sentencepiece>=0.1.99",
+    "ftfy>=6.1.0",
+    "controlnet-aux>=0.0.6",
+    "oss2>=2.17.0",
+    "decord>=0.6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "black>=23.0.0",
+    "flake8>=6.0.0",
+]
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["diffsynth"]
+
+[tool.setuptools.package-data]
+diffsynth = ["tokenizer_configs/**/**/*.*"]
+
