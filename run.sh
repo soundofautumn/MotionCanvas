@@ -1,0 +1,15 @@
+python inference_motioncanvas.py \
+  --dit_path models/wan_1.3b/diffusion_pytorch_model.safetensors \
+  --vae_path models/wan_1.3b/Wan2.1_VAE.pth \
+  --text_encoder_path models/wan_1.3b/models_t5_umt5-xxl-enc-bf16.pth \
+  --image_encoder_path models/wan_1.3b/models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth \
+  --checkpoint_path models/motioncanvas/motioncanvas.pt \
+  --prompt "A beautiful woman walking on the beach" \
+  --negative_prompt "worst quality, low quality" \
+  --height 480 \
+  --width 832 \
+  --num_frames 49 \
+  --num_inference_steps 50 \
+  --cfg_scale 5.0 \
+  --seed 42 \
+  --output output.mp4
