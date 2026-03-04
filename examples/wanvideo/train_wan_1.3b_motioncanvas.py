@@ -72,8 +72,13 @@ class LightningModelForTrain(pl.LightningModule):
         self.tiler_kwargs = {"tiled": tiled, "tile_size": tile_size, "tile_stride": tile_stride}
         # self.vae_channel = 16
         # self.downsample_ratios = [4, 8, 8]
-        torch.hub.set_dir('/mnt/29a30e4acb8/jinboxing/cache/torch_cache/hub')
-        self.cotracker = torch.hub.load("/mnt/29a30e4acb8/jinboxing/cache/torch_cache/hub/facebookresearch_co-tracker_main", "cotracker3_offline", source="local").to('cuda', dtype=torch.bfloat16)
+        # CoTracker: 优先使用本地缓存，否则从 GitHub 下载（本机训练用）
+        cotracker_local = os.environ.get("COTRACKER_HUB_DIR")
+        if cotracker_local and os.path.isdir(os.path.join(cotracker_local, "facebookresearch_co-tracker_main")):
+            torch.hub.set_dir(cotracker_local)
+            self.cotracker = torch.hub.load(os.path.join(cotracker_local, "facebookresearch_co-tracker_main"), "cotracker3_offline", source="local").to("cuda", dtype=torch.bfloat16)
+        else:
+            self.cotracker = torch.hub.load("facebookresearch/co-tracker", "cotracker3_offline", trust_repo=True).to("cuda", dtype=torch.bfloat16)
         self.cotracker.requires_grad_(False)
 
         self.p_drop_bbox=p_drop_bbox

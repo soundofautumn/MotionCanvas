@@ -1,5 +1,28 @@
 # 训练脚本使用说明
 
+## 单机训练（Linux / WSL 本机）
+
+在**本机**用 1 张或多张 GPU 训练时，使用：
+
+```bash
+# 1. 按需设置路径（或使用脚本内默认相对路径）
+export DATA_PATH=data/dataset
+export OUTPUT_PATH=outputs/checkpoints
+export DIT_PATH=models/wan_1.3b/dit
+export VAE_PATH=models/wan_1.3b/vae
+export TEXT_ENCODER_PATH=models/wan_1.3b/text_encoder
+export IMAGE_ENCODER_PATH=models/wan_1.3b/image_encoder
+
+# 2. 可选：多 GPU 时指定数量（默认 1）
+# export NUM_GPUS=2
+
+# 3. 运行单机训练
+./train_1.3b_local.sh
+```
+
+- 脚本 **train_1.3b_local.sh** 使用 1 个节点、默认 1 张 GPU（可通过 `NUM_GPUS` 修改）。
+- CoTracker 会从 GitHub 自动下载（首次运行需联网）；若已缓存到本地，可设置 `COTRACKER_HUB_DIR` 指向 hub 目录以使用本地副本。
+
 ## Windows 脚本版本
 
 已将 Linux shell 脚本 `train_1.3b.sh` 转换为 Windows 版本：
