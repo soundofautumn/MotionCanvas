@@ -429,7 +429,7 @@ with gr.Blocks(
                 label="负面提示词", lines=2, value=DEFAULT_NEGATIVE_PROMPT,
             )
 
-            with gr.Accordion("输入图像（I2V 模式）", open=False):
+            with gr.Accordion("输入图像（I2V 模式）", open=True):
                 input_image = gr.Image(
                     label="起始帧图像", type="pil", sources=["upload"],
                 )
