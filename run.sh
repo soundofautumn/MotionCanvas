@@ -5,7 +5,6 @@ python inference_motioncanvas.py \
   --image_encoder_path /root/autodl-tmp/models/wan_1.3b/models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth \
   --checkpoint_path /root/autodl-tmp/models/motioncanvas/model.pt \
   --prompt "A beautiful woman walking on the beach" \
-  --negative_prompt "worst quality, low quality" \
   --height 480 \
   --width 832 \
   --num_frames 49 \
