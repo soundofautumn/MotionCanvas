@@ -481,6 +481,10 @@ class WanVideoPipeline_motioncanvas(BasePipeline):
             num_frames_ = (num_frames-1)*4+1
             height_ = height * 8
             width_ = width * 8
+        else:
+            num_frames_ = num_frames
+            height_ = height
+            width_ = width
         if input_image is not None and self.image_encoder is not None:
             self.load_models_to_device(["image_encoder", "vae"])
             image_emb = self.encode_image(input_image, end_image, num_frames_, height_, width_, **tiler_kwargs)
