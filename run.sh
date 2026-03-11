@@ -4,11 +4,12 @@ python inference_motioncanvas.py \
   --text_encoder_path /root/autodl-tmp/models/wan_1.3b/models_t5_umt5-xxl-enc-bf16.pth \
   --image_encoder_path /root/autodl-tmp/models/wan_1.3b/models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth \
   --checkpoint_path /root/autodl-tmp/models/motioncanvas/model.pt \
-  --prompt "A beautiful woman walking on the beach" \
+  --input_image data/input_img/cat.png \
+  --prompt "A gray and white tabby cat sitting on a pink pillow by the window, the cat slowly turns its head to look at the camera, ears twitching, whiskers moving gently, soft natural sunlight" \
   --height 480 \
   --width 832 \
   --num_frames 49 \
   --num_inference_steps 50 \
   --cfg_scale 5.0 \
   --seed 42 \
-  --output output.mp4
+  --output output_cat.mp4
