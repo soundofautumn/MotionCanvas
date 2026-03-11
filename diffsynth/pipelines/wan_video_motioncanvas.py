@@ -488,6 +488,13 @@ class WanVideoPipeline_motioncanvas(BasePipeline):
         if input_image is not None and self.image_encoder is not None:
             self.load_models_to_device(["image_encoder", "vae"])
             image_emb = self.encode_image(input_image, end_image, num_frames_, height_, width_, **tiler_kwargs)
+        elif hasattr(self.dit, 'has_image_input') and self.dit.has_image_input:
+            latent_f = (num_frames_ - 1) // 4 + 1
+            latent_h, latent_w = height_ // 8, width_ // 8
+            image_emb = {
+                "clip_feature": torch.zeros((1, 257, 1280), dtype=self.torch_dtype, device=self.device),
+                "y": torch.zeros((1, 20, latent_f, latent_h, latent_w), dtype=self.torch_dtype, device=self.device),
+            }
         else:
             image_emb = {}
             
