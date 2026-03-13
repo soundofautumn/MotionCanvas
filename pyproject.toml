@@ -35,7 +35,7 @@ dependencies = [
     "scipy>=1.10.0",
     "einops>=0.7.0",
     "xformers>=0.0.20; platform_system != 'Windows'",
-    "imageio>=2.25.0",
+    "imageio[ffmpeg]>=2.25.0",
     "sentencepiece>=0.1.99",
     "ftfy>=6.1.0",
     "controlnet-aux>=0.0.6",
