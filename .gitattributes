@@ -1,0 +1,2 @@
+# Shell scripts: always LF so they run on Linux (e.g. autodl)
+*.sh text eol=lf
