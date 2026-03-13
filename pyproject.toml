@@ -60,12 +60,12 @@ packages = ["diffsynth"]
 [tool.setuptools.package-data]
 diffsynth = ["tokenizer_configs/**/**/*.*"]
 
-[[index]]
+[[tool.uv.index]]
 url = "https://mirrors.cloud.tencent.com/pypi/simple"
 default = true
 
-[[index]]
+[[tool.uv.index]]
 url = "https://pypi.tuna.tsinghua.edu.cn/simple"
 
-[[index]]
+[[tool.uv.index]]
 url = "https://mirrors.aliyun.com/pypi/simple"

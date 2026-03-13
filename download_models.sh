@@ -110,7 +110,7 @@ check_file "${MODEL_DIR}/wan_1.3b/models_clip_open-clip-xlm-roberta-large-vit-hu
 
 echo ""
 echo "MotionCanvas:"
-check_file "${MODEL_DIR}/motioncanvas/motioncanvas.pt"
+check_file "${MODEL_DIR}/motioncanvas/model.pt"
 
 echo ""
 if [ $MISSING -eq 0 ]; then
