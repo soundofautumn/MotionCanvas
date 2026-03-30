@@ -347,6 +347,7 @@ class WanVideoPipeline_motioncanvas(BasePipeline):
         video_rgb=None,
         video_frame_num=49,
         bbox_mask=None,
+        camera_mask=None,
         reference_imgs_indicator=None,
         object_bbox_masks=None,
         object_masks=None,
@@ -361,6 +362,12 @@ class WanVideoPipeline_motioncanvas(BasePipeline):
             bbox_latents = self.bbox_zeroconv(bbox_latents)
         else:
             lat_c = None   # 后续生成 track_video 时需要，若无 bbox_mask 则无法确定通道数，此处设为 None
+
+        # 处理相机运动（可选）
+        camera_latents = None
+        if camera_mask is not None and hasattr(self, 'camera_zeroconv'):
+            camera_latents = self.encode_video(camera_mask, **tiler_kwargs).to(dtype=self.torch_dtype, device=self.device)
+            camera_latents = self.camera_zeroconv(camera_latents)
 
         track_info = None
         if track_video is None:
@@ -381,7 +388,7 @@ class WanVideoPipeline_motioncanvas(BasePipeline):
             else:
                 track_video = None
 
-        return bbox_latents, track_video, track_info
+        return bbox_latents, camera_latents, track_video, track_info
 
     @torch.no_grad()
     def __call__(
@@ -419,6 +426,7 @@ class WanVideoPipeline_motioncanvas(BasePipeline):
         reference_imgs=None,
         reference_imgs_indicator=None,
         bbox_mask=None,
+        camera_mask=None,
         track_video=None,
         cotracker=None,
         object_bbox_masks=None,
@@ -460,10 +468,11 @@ class WanVideoPipeline_motioncanvas(BasePipeline):
         if cfg_scale != 1.0:
             prompt_emb_nega = self.encode_prompt([negative_prompt] * len(prompt), positive=False)
         
-        bbox_latents, traj_video, track_info = self.prepare_motioncanvas_kwargs(
+        bbox_latents, camera_latents, traj_video, track_info = self.prepare_motioncanvas_kwargs(
             video_rgb=None,
             video_frame_num=49,
             bbox_mask=bbox_mask,
+            camera_mask=camera_mask,
             reference_imgs_indicator=reference_imgs_indicator,
             object_bbox_masks=object_bbox_masks,
             object_masks=object_masks,
@@ -474,6 +483,8 @@ class WanVideoPipeline_motioncanvas(BasePipeline):
 
         if bbox_latents is not None:
             latents = latents + bbox_latents
+        if camera_latents is not None:
+            latents = latents + camera_latents
         dreamvideo2_kwargs = {'traj_video': traj_video}
             
         # Encode image

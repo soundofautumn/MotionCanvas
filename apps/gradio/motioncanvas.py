@@ -288,6 +288,168 @@ def preview_motion_path(input_image, editor_start, editor_mid, editor_end, num_f
     return result.convert("RGB")
 
 
+# ==================== Camera Motion Control ====================
+
+def build_camera_mask_from_json_str(json_str, num_frames, height, width):
+    """将相机 JSON 转换为张量。格式: {'camera': {'keyframes': [{'frame': 0, 'zoom': 1.0, 'pan': [0, 0], 'rotation': 0}, ...]}}"""
+    try:
+        camera_data = json.loads(json_str)
+        keyframes_list = camera_data.get("camera", {}).get("keyframes", [])
+    except:
+        return None
+
+    if not keyframes_list:
+        return None
+
+    # 创建张量存储相机参数 (1, 4, num_frames, height, width)
+    # 4 通道: zoom, pan_x, pan_y, rotation
+    mask = torch.zeros(1, 4, num_frames, height, width)
+
+    # 提取关键帧信息
+    kf_dict = {}
+    for kf in keyframes_list:
+        frame_idx = int(kf.get("frame", 0))
+        kf_dict[frame_idx] = {
+            "zoom": float(kf.get("zoom", 1.0)),
+            "pan_x": float(kf.get("pan", [0, 0])[0]),
+            "pan_y": float(kf.get("pan", [0, 0])[1]),
+            "rotation": float(kf.get("rotation", 0)),
+        }
+
+    # 线性插值填充所有帧
+    frame_indices = sorted(kf_dict.keys())
+    if not frame_indices:
+        return None
+
+    for frame_idx in range(num_frames):
+        # 找到相邻的关键帧
+        prev_idx = 0
+        next_idx = num_frames - 1
+        for idx in frame_indices:
+            if idx <= frame_idx:
+                prev_idx = idx
+            if idx >= frame_idx and next_idx == num_frames - 1:
+                next_idx = idx
+
+        if prev_idx == next_idx:
+            # 在一个关键帧处或之前
+            kf_data = kf_dict.get(prev_idx, {"zoom": 1.0, "pan_x": 0, "pan_y": 0, "rotation": 0})
+        else:
+            # 在两个关键帧之间线性插值
+            t = (frame_idx - prev_idx) / (next_idx - prev_idx)
+            prev_kf = kf_dict.get(prev_idx, {"zoom": 1.0, "pan_x": 0, "pan_y": 0, "rotation": 0})
+            next_kf = kf_dict.get(next_idx, {"zoom": 1.0, "pan_x": 0, "pan_y": 0, "rotation": 0})
+            kf_data = {
+                "zoom": prev_kf["zoom"] * (1 - t) + next_kf["zoom"] * t,
+                "pan_x": prev_kf["pan_x"] * (1 - t) + next_kf["pan_x"] * t,
+                "pan_y": prev_kf["pan_y"] * (1 - t) + next_kf["pan_y"] * t,
+                "rotation": prev_kf["rotation"] * (1 - t) + next_kf["rotation"] * t,
+            }
+
+        # 归一化到 [-1, 1] 范围
+        # zoom: 0.5-2.0 -> [-1, 1]
+        zoom_normalized = (kf_data["zoom"] - 0.5) / 0.75  # 1.0 -> 0, 0.5 -> -1, 2.0 -> 2
+        zoom_normalized = max(-1.0, min(1.0, zoom_normalized))
+
+        # pan: -100 to +100 -> [-1, 1]
+        pan_x_normalized = kf_data["pan_x"] / 100.0
+        pan_y_normalized = kf_data["pan_y"] / 100.0
+        pan_x_normalized = max(-1.0, min(1.0, pan_x_normalized))
+        pan_y_normalized = max(-1.0, min(1.0, pan_y_normalized))
+
+        # rotation: -45 to +45 -> [-1, 1]
+        rotation_normalized = kf_data["rotation"] / 45.0
+        rotation_normalized = max(-1.0, min(1.0, rotation_normalized))
+
+        mask[:, 0, frame_idx, :, :] = zoom_normalized
+        mask[:, 1, frame_idx, :, :] = pan_x_normalized
+        mask[:, 2, frame_idx, :, :] = pan_y_normalized
+        mask[:, 3, frame_idx, :, :] = rotation_normalized
+
+    return mask * 1.0
+
+
+def generate_camera_json_from_sliders(zoom_start, pan_x_start, pan_y_start, rotation_start,
+                                      zoom_mid, pan_x_mid, pan_y_mid, rotation_mid,
+                                      zoom_end, pan_x_end, pan_y_end, rotation_end, num_frames):
+    """从滑块值生成相机 JSON"""
+    nf = int(num_frames)
+    keyframes = [
+        {"frame": 0, "zoom": zoom_start, "pan": [pan_x_start, pan_y_start], "rotation": rotation_start},
+        {"frame": nf // 2, "zoom": zoom_mid, "pan": [pan_x_mid, pan_y_mid], "rotation": rotation_mid},
+        {"frame": nf - 1, "zoom": zoom_end, "pan": [pan_x_end, pan_y_end], "rotation": rotation_end},
+    ]
+    return json.dumps({"camera": {"keyframes": keyframes}}, indent=2)
+
+
+def preview_camera_motion(input_image, zoom_start, pan_x_start, pan_y_start, rotation_start,
+                          zoom_mid, pan_x_mid, pan_y_mid, rotation_mid,
+                          zoom_end, pan_x_end, pan_y_end, rotation_end, num_frames):
+    """在输入图像上叠加绘制相机轨迹预览。显示视口矩形和轨迹线。"""
+    if input_image is None:
+        return None
+
+    nf = int(num_frames)
+    img = input_image.copy().convert("RGBA")
+    w, h = img.size
+
+    # 定义三个关键帧的相机参数
+    keyframes = [
+        (zoom_start, pan_x_start, pan_y_start, rotation_start, (76, 175, 255), "起始帧 (F0)"),
+        (zoom_mid, pan_x_mid, pan_y_mid, rotation_mid, (255, 193, 7), f"中间帧 (F{nf // 2})"),
+        (zoom_end, pan_x_end, pan_y_end, rotation_end, (244, 67, 54), f"结束帧 (F{nf - 1})"),
+    ]
+
+    overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    centers = []
+    draw_overlay = ImageDraw.Draw(overlay)
+
+    for zoom, pan_x, pan_y, rotation, color, label in keyframes:
+        # 计算视口矩形
+        # zoom: 1.0 = original, 0.5 = 2x zoomed out (larger rect), 2.0 = 2x zoomed in (smaller rect)
+        viewport_w = w / zoom
+        viewport_h = h / zoom
+
+        # 计算视口左上角位置 (基于 pan 和中心)
+        center_x = w / 2 + pan_x
+        center_y = h / 2 + pan_y
+
+        x1 = int(center_x - viewport_w / 2)
+        y1 = int(center_y - viewport_h / 2)
+        x2 = int(center_x + viewport_w / 2)
+        y2 = int(center_y + viewport_h / 2)
+
+        # 裁剪到图像边界
+        x1 = max(0, x1)
+        y1 = max(0, y1)
+        x2 = min(w, x2)
+        y2 = min(h, y2)
+
+        # 绘制半透明矩形
+        fill_layer = Image.new("RGBA", img.size, (0, 0, 0, 0))
+        fd = ImageDraw.Draw(fill_layer)
+        fd.rectangle([x1, y1, x2, y2], fill=(*color, 40))
+        overlay = Image.alpha_composite(overlay, fill_layer)
+
+        # 绘制矩形边框
+        draw_overlay.rectangle([x1, y1, x2, y2], outline=(*color, 200), width=2)
+
+        # 添加标签
+        draw_overlay.text((x1 + 6, y1 + 6), label, fill=(*color, 255))
+
+        # 记录中心点用于绘制轨迹线
+        centers.append((center_x, center_y))
+
+    # 绘制轨迹线连接各关键帧
+    if len(centers) >= 2:
+        for i in range(len(centers) - 1):
+            draw_overlay.line([centers[i], centers[i + 1]],
+                             fill=(255, 255, 255, 180), width=3)
+
+    result = Image.alpha_composite(img, overlay)
+    return result.convert("RGB")
+
+
 # ==================== Video Generation ====================
 
 def generate_video(
@@ -295,7 +457,7 @@ def generate_video(
     input_image, end_image,
     height, width, num_frames, num_inference_steps,
     cfg_scale, sigma_shift, seed, fps,
-    bbox_mask_file, track_video_file, bbox_json_text,
+    bbox_mask_file, track_video_file, bbox_json_text, camera_json_text,
     progress=gr.Progress()
 ):
     if pipe_state["pipe"] is None:
@@ -318,30 +480,50 @@ def generate_video(
         except Exception as e:
             raise gr.Error(f"Bbox JSON 解析失败: {e}")
 
+    # 处理相机运动
+    camera_mask = None
+    if camera_json_text and camera_json_text.strip():
+        try:
+            camera_mask = build_camera_mask_from_json_str(
+                camera_json_text, int(num_frames), int(height), int(width)
+            )
+            if camera_mask is not None:
+                camera_mask = camera_mask.to(dtype=torch_dtype, device=device)
+        except Exception as e:
+            print(f"警告: 相机 JSON 解析失败: {e}")
+            camera_mask = None
+
     track_video = None
     if track_video_file is not None:
         track_video = torch.load(track_video_file, map_location="cpu")
         track_video = track_video.to(dtype=torch_dtype, device=device)
 
-    video_frames = pipe(
-        prompt=[prompt],
-        negative_prompt=negative_prompt,
-        input_image=input_image,
-        end_image=end_image,
-        num_inference_steps=int(num_inference_steps),
-        height=int(height),
-        width=int(width),
-        num_frames=int(num_frames),
-        cfg_scale=cfg_scale,
-        sigma_shift=sigma_shift,
-        seed=int(seed),
-        tiled=True,
-        tile_size=(30, 52),
-        tile_stride=(15, 26),
-        bbox_mask=bbox_mask,
-        track_video=track_video,
-        progress_bar_cmd=progress.tqdm,
-    )
+    # 构建管道参数
+    pipeline_kwargs = {
+        "prompt": [prompt],
+        "negative_prompt": negative_prompt,
+        "input_image": input_image,
+        "end_image": end_image,
+        "num_inference_steps": int(num_inference_steps),
+        "height": int(height),
+        "width": int(width),
+        "num_frames": int(num_frames),
+        "cfg_scale": cfg_scale,
+        "sigma_shift": sigma_shift,
+        "seed": int(seed),
+        "tiled": True,
+        "tile_size": (30, 52),
+        "tile_stride": (15, 26),
+        "bbox_mask": bbox_mask,
+        "track_video": track_video,
+        "progress_bar_cmd": progress.tqdm,
+    }
+
+    # 如果管道支持相机运动，则传递相机 mask
+    if camera_mask is not None and hasattr(pipe, 'camera_zeroconv'):
+        pipeline_kwargs["camera_mask"] = camera_mask
+
+    video_frames = pipe(**pipeline_kwargs)
 
     if not video_frames or len(video_frames) == 0:
         raise gr.Error("生成失败，没有输出帧")
@@ -554,14 +736,88 @@ with gr.Blocks(
                             label="运动路径预览", interactive=False,
                         )
 
+                    # ---- 相机运动 Tab ----
+                    with gr.Tab("相机运动"):
+                        gr.Markdown(
+                            "通过调整三个关键帧的相机参数来定义相机轨迹。\n"
+                            "包括缩放（Zoom）、平移（Pan）和旋转（Rotation）。"
+                        )
+
+                        gr.Markdown("#### 起始帧相机参数", elem_classes="section-title")
+                        with gr.Row():
+                            camera_zoom_start = gr.Slider(
+                                0.5, 2.0, value=1.0, step=0.1, label="缩放 (Zoom)",
+                            )
+                            camera_pan_x_start = gr.Slider(
+                                -100, 100, value=0, step=5, label="平移 X (Pan X)",
+                            )
+                            camera_pan_y_start = gr.Slider(
+                                -100, 100, value=0, step=5, label="平移 Y (Pan Y)",
+                            )
+                            camera_rotation_start = gr.Slider(
+                                -45, 45, value=0, step=5, label="旋转 (°)",
+                            )
+
+                        gr.Markdown("#### 中间帧相机参数", elem_classes="section-title")
+                        with gr.Row():
+                            camera_zoom_mid = gr.Slider(
+                                0.5, 2.0, value=1.0, step=0.1, label="缩放 (Zoom)",
+                            )
+                            camera_pan_x_mid = gr.Slider(
+                                -100, 100, value=0, step=5, label="平移 X (Pan X)",
+                            )
+                            camera_pan_y_mid = gr.Slider(
+                                -100, 100, value=0, step=5, label="平移 Y (Pan Y)",
+                            )
+                            camera_rotation_mid = gr.Slider(
+                                -45, 45, value=0, step=5, label="旋转 (°)",
+                            )
+
+                        gr.Markdown("#### 结束帧相机参数", elem_classes="section-title")
+                        with gr.Row():
+                            camera_zoom_end = gr.Slider(
+                                0.5, 2.0, value=1.0, step=0.1, label="缩放 (Zoom)",
+                            )
+                            camera_pan_x_end = gr.Slider(
+                                -100, 100, value=0, step=5, label="平移 X (Pan X)",
+                            )
+                            camera_pan_y_end = gr.Slider(
+                                -100, 100, value=0, step=5, label="平移 Y (Pan Y)",
+                            )
+                            camera_rotation_end = gr.Slider(
+                                -45, 45, value=0, step=5, label="旋转 (°)",
+                            )
+
+                        with gr.Row():
+                            camera_extract_btn = gr.Button(
+                                "生成相机 JSON", variant="secondary",
+                            )
+                            camera_preview_btn = gr.Button(
+                                "预览相机轨迹", variant="secondary",
+                            )
+                        camera_motion_preview = gr.Image(
+                            label="相机轨迹预览", interactive=False,
+                        )
+
                     # ---- JSON / 高级 Tab ----
                     with gr.Tab("JSON / 高级选项"):
+                        gr.Markdown("#### 物体运动")
                         bbox_json_text = gr.Code(
                             label="Bbox JSON（可由可视化选区自动生成，也可手动编辑）",
                             language="json",
                             value="",
                             lines=12,
                         )
+
+                        gr.Markdown("#### 相机运动")
+                        camera_json_text = gr.Code(
+                            label="相机 JSON（可由相机运动 Tab 自动生成，也可手动编辑）",
+                            language="json",
+                            value="",
+                            lines=12,
+                        )
+
+                        gr.Markdown("#### 高级输入")
                         with gr.Row():
                             bbox_mask_file = gr.File(
                                 label="Bbox Mask (.pt)", file_types=[".pt"],
@@ -606,6 +862,40 @@ with gr.Blocks(
         outputs=[motion_preview],
     )
 
+    # ---- 相机运动事件绑定 ----
+    camera_extract_btn.click(
+        fn=generate_camera_json_from_sliders,
+        inputs=[
+            camera_zoom_start, camera_pan_x_start, camera_pan_y_start, camera_rotation_start,
+            camera_zoom_mid, camera_pan_x_mid, camera_pan_y_mid, camera_rotation_mid,
+            camera_zoom_end, camera_pan_x_end, camera_pan_y_end, camera_rotation_end,
+            num_frames,
+        ],
+        outputs=[camera_json_text],
+    ).then(
+        fn=preview_camera_motion,
+        inputs=[
+            input_image,
+            camera_zoom_start, camera_pan_x_start, camera_pan_y_start, camera_rotation_start,
+            camera_zoom_mid, camera_pan_x_mid, camera_pan_y_mid, camera_rotation_mid,
+            camera_zoom_end, camera_pan_x_end, camera_pan_y_end, camera_rotation_end,
+            num_frames,
+        ],
+        outputs=[camera_motion_preview],
+    )
+
+    camera_preview_btn.click(
+        fn=preview_camera_motion,
+        inputs=[
+            input_image,
+            camera_zoom_start, camera_pan_x_start, camera_pan_y_start, camera_rotation_start,
+            camera_zoom_mid, camera_pan_x_mid, camera_pan_y_mid, camera_rotation_mid,
+            camera_zoom_end, camera_pan_x_end, camera_pan_y_end, camera_rotation_end,
+            num_frames,
+        ],
+        outputs=[camera_motion_preview],
+    )
+
     generate_btn.click(
         fn=generate_video,
         inputs=[
@@ -613,7 +903,7 @@ with gr.Blocks(
             input_image, end_image,
             height, width, num_frames, num_inference_steps,
             cfg_scale, sigma_shift, seed, fps,
-            bbox_mask_file, track_video_file, bbox_json_text,
+            bbox_mask_file, track_video_file, bbox_json_text, camera_json_text,
         ],
         outputs=output_video,
     )
