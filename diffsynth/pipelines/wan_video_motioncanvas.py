@@ -356,6 +356,8 @@ class WanVideoPipeline_motioncanvas(BasePipeline):
     ):
         bbox_latents = None
         if bbox_mask is not None:
+            self.load_models_to_device(["vae"])
+            bbox_mask = bbox_mask.to(dtype=self.torch_dtype, device=self.device)
             bbox_latents = self.encode_video(bbox_mask, **tiler_kwargs).to(dtype=self.torch_dtype, device=self.device)
             lat_c = bbox_latents.shape[1]
             bbox_latents = self.bbox_zeroconv(bbox_latents)

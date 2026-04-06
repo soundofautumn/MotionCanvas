@@ -669,7 +669,6 @@ def generate_video(
         "progress_bar_cmd": progress.tqdm,
     }
 
-    pipe.load_models_to_device(["vae"])
     video_frames = pipe(**pipeline_kwargs)
 
     if not video_frames or len(video_frames) == 0:
