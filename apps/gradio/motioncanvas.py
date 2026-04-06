@@ -627,9 +627,10 @@ def generate_video(
                 f"reference_imgs_indicator={reference_imgs_indicator}, lat_c={lat_c}"
             )
 
-            cotracker = load_cotracker(device=device, dtype=torch.float32)
-            video_rgb = video_rgb.unsqueeze(0).to(device=device, dtype=torch.float32)
-            object_masks = object_masks.to(device=device)
+            device_obj = torch.device(device)
+            cotracker = load_cotracker(device=device_obj, dtype=torch.float32)
+            video_rgb = video_rgb.unsqueeze(0).to(device=device_obj, dtype=torch.float32)
+            object_masks = object_masks.to(device=device_obj)
 
             object_masks_per_sample = torch.split(object_masks, reference_imgs_indicator, dim=0)
             track_video, _, _ = get_video_track_video(
@@ -639,7 +640,7 @@ def generate_video(
                 pipe.downsample_ratios,
                 lat_c,
                 grid_size=12,
-                device=device,
+                device=device_obj,
                 dtype=torch.float32,
             )
             track_video = track_video.to(dtype=torch_dtype, device=device)
