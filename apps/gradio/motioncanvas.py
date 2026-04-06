@@ -582,10 +582,14 @@ def generate_video(
             print(f"警告: 相机 JSON 解析失败: {e}")
             camera_mask = None
 
+    debug_lines = []
     track_video = None
     if track_video_file is not None:
         track_video = torch.load(track_video_file, map_location="cpu")
         track_video = track_video.to(dtype=torch_dtype, device=device)
+        debug_lines.append(
+            f"track_video loaded: shape={tuple(track_video.shape)}, dtype={track_video.dtype}, device={track_video.device}"
+        )
 
     if track_video is None and bbox_mask is not None:
         object_masks = None
@@ -609,11 +613,19 @@ def generate_video(
             input_image, end_image, int(num_frames), int(height), int(width)
         )
 
+        if video_rgb is None:
+            debug_lines.append("track_video skipped: video_rgb is None")
+
         if video_rgb is not None:
             tiler_kwargs = {"tiled": True, "tile_size": (30, 52), "tile_stride": (15, 26)}
             pipe.load_models_to_device(["vae"])
             bbox_latents = pipe.encode_video(bbox_mask, **tiler_kwargs)
             lat_c = bbox_latents.shape[1]
+
+            debug_lines.append(
+                f"auto track inputs: video_rgb={tuple(video_rgb.shape)}, object_masks={tuple(object_masks.shape)}, "
+                f"reference_imgs_indicator={reference_imgs_indicator}, lat_c={lat_c}"
+            )
 
             cotracker = load_cotracker(device=device, dtype=torch.float32)
             video_rgb = video_rgb.unsqueeze(0).to(device=device, dtype=torch.float32)
@@ -631,6 +643,9 @@ def generate_video(
                 dtype=torch.float32,
             )
             track_video = track_video.to(dtype=torch_dtype, device=device)
+            debug_lines.append(
+                f"track_video generated: shape={tuple(track_video.shape)}, dtype={track_video.dtype}, device={track_video.device}"
+            )
 
     # 构建管道参数
     pipeline_kwargs = {
@@ -660,7 +675,10 @@ def generate_video(
 
     output_path = os.path.join(tempfile.gettempdir(), "motioncanvas_output.mp4")
     save_video(video_frames[0], output_path, fps=int(fps), quality=5)
-    return output_path
+    if not debug_lines:
+        debug_lines.append("track_video not provided and not generated")
+
+    return output_path, "\n".join(debug_lines)
 
 
 # ==================== UI ====================
@@ -972,6 +990,9 @@ with gr.Blocks(
                 elem_classes="generate-btn",
             )
             output_video = gr.Video(label="生成结果", interactive=False)
+            debug_info = gr.Textbox(
+                label="调试信息", lines=6, interactive=False, show_copy_button=True
+            )
 
     # ---- 事件绑定 ----
 
@@ -1046,7 +1067,7 @@ with gr.Blocks(
             cfg_scale, sigma_shift, seed, fps,
             bbox_mask_file, track_video_file, bbox_json_text, camera_json_text,
         ],
-        outputs=output_video,
+        outputs=[output_video, debug_info],
     )
 
 
