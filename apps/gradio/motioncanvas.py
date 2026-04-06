@@ -697,6 +697,279 @@ def build_camera_mask_from_json_str(json_str, num_frames, height, width):
     return mask * 1.0
 
 
+def build_camera_params_from_json(json_str, num_frames):
+    try:
+        camera_data = json.loads(json_str)
+        keyframes_list = camera_data.get("camera", {}).get("keyframes", [])
+    except Exception:
+        return None
+
+    if not keyframes_list:
+        return None
+
+    kf_dict = {}
+    for kf in keyframes_list:
+        frame_idx = int(kf.get("frame", 0))
+        kf_dict[frame_idx] = {
+            "zoom": float(kf.get("zoom", 1.0)),
+            "pan_x": float(kf.get("pan", [0, 0])[0]),
+            "pan_y": float(kf.get("pan", [0, 0])[1]),
+            "rotation": float(kf.get("rotation", 0)),
+        }
+
+    frame_indices = sorted(kf_dict.keys())
+    if not frame_indices:
+        return None
+
+    params = []
+    for frame_idx in range(num_frames):
+        prev_idx = 0
+        next_idx = num_frames - 1
+        for idx in frame_indices:
+            if idx <= frame_idx:
+                prev_idx = idx
+            if idx >= frame_idx and next_idx == num_frames - 1:
+                next_idx = idx
+
+        if prev_idx == next_idx:
+            kf_data = kf_dict.get(prev_idx, {"zoom": 1.0, "pan_x": 0, "pan_y": 0, "rotation": 0})
+        else:
+            t = (frame_idx - prev_idx) / (next_idx - prev_idx)
+            prev_kf = kf_dict.get(prev_idx, {"zoom": 1.0, "pan_x": 0, "pan_y": 0, "rotation": 0})
+            next_kf = kf_dict.get(next_idx, {"zoom": 1.0, "pan_x": 0, "pan_y": 0, "rotation": 0})
+            kf_data = {
+                "zoom": prev_kf["zoom"] * (1 - t) + next_kf["zoom"] * t,
+                "pan_x": prev_kf["pan_x"] * (1 - t) + next_kf["pan_x"] * t,
+                "pan_y": prev_kf["pan_y"] * (1 - t) + next_kf["pan_y"] * t,
+                "rotation": prev_kf["rotation"] * (1 - t) + next_kf["rotation"] * t,
+            }
+
+        params.append(kf_data)
+
+    return params
+
+
+def apply_camera_transform(image, zoom, pan_x, pan_y, rotation):
+    w, h = image.size
+
+    zoom = max(0.1, float(zoom))
+    new_w = max(1, int(round(w * zoom)))
+    new_h = max(1, int(round(h * zoom)))
+    resized = image.resize((new_w, new_h), Image.BILINEAR)
+
+    if zoom >= 1.0:
+        left = (new_w - w) // 2
+        top = (new_h - h) // 2
+        cropped = resized.crop((left, top, left + w, top + h))
+    else:
+        cropped = Image.new("RGB", (w, h), (0, 0, 0))
+        left = (w - new_w) // 2
+        top = (h - new_h) // 2
+        cropped.paste(resized, (left, top))
+
+    rotated = cropped.rotate(rotation, resample=Image.BILINEAR, expand=False)
+
+    shifted = Image.new("RGB", (w, h), (0, 0, 0))
+    shifted.paste(rotated, (int(round(pan_x)), int(round(pan_y))))
+    return shifted
+
+
+def transform_point(x, y, params, width, height):
+    cx = width / 2.0
+    cy = height / 2.0
+    dx = x - cx
+    dy = y - cy
+
+    zoom = params.get("zoom", 1.0)
+    dx *= zoom
+    dy *= zoom
+
+    rot = np.deg2rad(params.get("rotation", 0.0))
+    cos_r = np.cos(rot)
+    sin_r = np.sin(rot)
+    rx = dx * cos_r - dy * sin_r
+    ry = dx * sin_r + dy * cos_r
+
+    tx = rx + cx + params.get("pan_x", 0.0)
+    ty = ry + cy + params.get("pan_y", 0.0)
+    return tx, ty
+
+
+def build_interpolated_bboxes(json_str, num_frames, height, width):
+    if not json_str or not json_str.strip():
+        return None
+
+    bbox_data = json.loads(json_str)
+    objects = bbox_data.get("objects", [])
+    if not objects:
+        return None
+
+    all_boxes = []
+    for obj in objects:
+        frames = obj.get("frames", {})
+        if not frames:
+            continue
+
+        keyframes = []
+        for fi_str, bbox in frames.items():
+            fi = int(fi_str)
+            if fi >= num_frames:
+                continue
+            x1, y1, x2, y2 = bbox
+            if all(0 <= v <= 1.0 for v in [x1, y1, x2, y2]):
+                x1, x2 = x1 * width, x2 * width
+                y1, y2 = y1 * height, y2 * height
+            keyframes.append((fi, float(x1), float(y1), float(x2), float(y2)))
+
+        if not keyframes:
+            continue
+
+        keyframes = sorted(keyframes, key=lambda x: x[0])
+        per_frame = []
+        for f in range(num_frames):
+            if f <= keyframes[0][0]:
+                per_frame.append(keyframes[0][1:])
+                continue
+            if f >= keyframes[-1][0]:
+                per_frame.append(keyframes[-1][1:])
+                continue
+            for idx in range(len(keyframes) - 1):
+                f0, x10, y10, x20, y20 = keyframes[idx]
+                f1, x11, y11, x21, y21 = keyframes[idx + 1]
+                if f0 <= f <= f1:
+                    span = max(1, f1 - f0)
+                    t = (f - f0) / span
+                    x1 = x10 + (x11 - x10) * t
+                    y1 = y10 + (y11 - y10) * t
+                    x2 = x20 + (x21 - x20) * t
+                    y2 = y20 + (y21 - y20) * t
+                    per_frame.append((x1, y1, x2, y2))
+                    break
+
+        all_boxes.append(per_frame)
+
+    if not all_boxes:
+        return None
+    return all_boxes
+
+
+def build_point_tracks_from_json(json_str, num_frames, height, width):
+    if not json_str or not json_str.strip():
+        return None
+
+    data = json.loads(json_str)
+    points = data.get("points", [])
+    if not points:
+        return None
+
+    tracks = []
+    for pt in points:
+        frames = pt.get("frames", {})
+        if not frames:
+            continue
+
+        keyframes = []
+        for fi_str, xy in frames.items():
+            fi = int(fi_str)
+            if fi >= num_frames:
+                continue
+            x, y = xy
+            if 0 <= x <= 1.0 and 0 <= y <= 1.0:
+                x = x * width
+                y = y * height
+            keyframes.append((fi, float(x), float(y)))
+
+        if not keyframes:
+            continue
+
+        keyframes = sorted(keyframes, key=lambda x: x[0])
+        per_frame = []
+        for f in range(num_frames):
+            if f <= keyframes[0][0]:
+                per_frame.append(keyframes[0][1:])
+                continue
+            if f >= keyframes[-1][0]:
+                per_frame.append(keyframes[-1][1:])
+                continue
+            for idx in range(len(keyframes) - 1):
+                f0, x0, y0 = keyframes[idx]
+                f1, x1, y1 = keyframes[idx + 1]
+                if f0 <= f <= f1:
+                    span = max(1, f1 - f0)
+                    t = (f - f0) / span
+                    per_frame.append((x0 + (x1 - x0) * t, y0 + (y1 - y0) * t))
+                    break
+
+        tracks.append(per_frame)
+
+    if not tracks:
+        return None
+    return tracks
+
+
+def build_motion_signals_preview(
+    input_image,
+    camera_json_text,
+    bbox_json_text,
+    point_json_text,
+    num_frames,
+    height,
+    width,
+    fps,
+):
+    if input_image is None:
+        return None
+
+    base = input_image.resize((width, height)).convert("RGB")
+    camera_params = build_camera_params_from_json(camera_json_text, num_frames)
+    if camera_params is None:
+        camera_params = [
+            {"zoom": 1.0, "pan_x": 0.0, "pan_y": 0.0, "rotation": 0.0}
+            for _ in range(num_frames)
+        ]
+
+    bbox_tracks = build_interpolated_bboxes(bbox_json_text, num_frames, height, width)
+    point_tracks = build_point_tracks_from_json(point_json_text, num_frames, height, width)
+
+    frames = []
+    colors = [(255, 0, 0), (0, 255, 0), (0, 128, 255), (255, 128, 0)]
+    for f in range(num_frames):
+        params = camera_params[f]
+        frame = apply_camera_transform(base, params["zoom"], params["pan_x"], params["pan_y"], params["rotation"])
+        draw = ImageDraw.Draw(frame)
+
+        if bbox_tracks is not None:
+            for obj_idx, obj_frames in enumerate(bbox_tracks):
+                if f >= len(obj_frames):
+                    continue
+                x1, y1, x2, y2 = obj_frames[f]
+                p1 = transform_point(x1, y1, params, width, height)
+                p2 = transform_point(x2, y2, params, width, height)
+                x_min = max(0, min(width, int(round(min(p1[0], p2[0])))))
+                y_min = max(0, min(height, int(round(min(p1[1], p2[1])))))
+                x_max = max(0, min(width, int(round(max(p1[0], p2[0])))))
+                y_max = max(0, min(height, int(round(max(p1[1], p2[1])))))
+                draw.rectangle([x_min, y_min, x_max, y_max], outline=colors[obj_idx % len(colors)], width=3)
+
+        if point_tracks is not None:
+            for pt_idx, pt_frames in enumerate(point_tracks):
+                if f >= len(pt_frames):
+                    continue
+                x, y = pt_frames[f]
+                tx, ty = transform_point(x, y, params, width, height)
+                r = 4
+                draw.ellipse([tx - r, ty - r, tx + r, ty + r], fill=colors[pt_idx % len(colors)])
+
+        frames.append(frame)
+
+    if not frames:
+        return None
+
+    preview_path = os.path.join(tempfile.gettempdir(), "motion_signals_preview.mp4")
+    save_video(frames, preview_path, fps=int(fps), quality=5)
+    return preview_path
+
+
 def generate_camera_json_from_sliders(zoom_start, pan_x_start, pan_y_start, rotation_start,
                                       zoom_mid, pan_x_mid, pan_y_mid, rotation_mid,
                                       zoom_end, pan_x_end, pan_y_end, rotation_end, num_frames):
@@ -933,6 +1206,31 @@ def preview_track_video(
     )
 
     return build_track_video_preview(track_video, input_image=input_image, fps=fps)
+
+
+def preview_motion_signals(
+    input_image,
+    camera_json_text,
+    bbox_json_text,
+    point_json_text,
+    num_frames,
+    height,
+    width,
+    fps,
+):
+    if input_image is None:
+        raise gr.Error("请先上传输入图像！")
+
+    return build_motion_signals_preview(
+        input_image,
+        camera_json_text,
+        bbox_json_text,
+        point_json_text,
+        int(num_frames),
+        int(height),
+        int(width),
+        fps,
+    )
 
 
 # ==================== UI ====================
@@ -1224,6 +1522,26 @@ with gr.Blocks(
                             lines=12,
                         )
 
+                        gr.Markdown("#### 局部运动（点轨迹）")
+                        point_json_text = gr.Code(
+                            label="Point Trajectory JSON",
+                            language="json",
+                            value=(
+                                "{\n"
+                                "  \"points\": [\n"
+                                "    {\n"
+                                "      \"frames\": {\n"
+                                "        \"0\": [0.5, 0.5],\n"
+                                "        \"24\": [0.6, 0.55],\n"
+                                "        \"48\": [0.7, 0.6]\n"
+                                "      }\n"
+                                "    }\n"
+                                "  ]\n"
+                                "}"
+                            ),
+                            lines=10,
+                        )
+
                         gr.Markdown("#### 高级输入")
                         with gr.Row():
                             bbox_mask_file = gr.File(
@@ -1239,7 +1557,9 @@ with gr.Blocks(
             )
             output_video = gr.Video(label="生成结果", interactive=False)
             track_preview = gr.Video(label="Track Video 预览", interactive=False)
+            motion_signals_preview = gr.Video(label="Motion Signals 预览", interactive=False)
             track_preview_btn = gr.Button("预览 Track Video", variant="secondary")
+            motion_preview_btn = gr.Button("预览 Motion Signals", variant="secondary")
 
     # ---- 事件绑定 ----
 
@@ -1325,6 +1645,21 @@ with gr.Blocks(
             bbox_mask_file, bbox_json_text,
         ],
         outputs=track_preview,
+    )
+
+    motion_preview_btn.click(
+        fn=preview_motion_signals,
+        inputs=[
+            input_image,
+            camera_json_text,
+            bbox_json_text,
+            point_json_text,
+            num_frames,
+            height,
+            width,
+            fps,
+        ],
+        outputs=motion_signals_preview,
     )
 
 
