@@ -9,7 +9,7 @@ import tempfile
 import json
 import torch
 import numpy as np
-from PIL import Image, ImageDraw
+from PIL import Image
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
@@ -195,36 +195,6 @@ def build_bbox_mask_from_json_str(json_str, num_frames, height, width):
     return mask * 2.0 - 1.0
 
 
-def build_object_masks_from_bbox_json(json_str, num_frames, height, width):
-    bbox_data = json.loads(json_str)
-    objects = bbox_data.get("objects", [])
-    if not objects:
-        return None
-
-    obj_masks = []
-    for obj in objects:
-        obj_mask = torch.zeros(num_frames, 1, height, width, dtype=torch.bool)
-        for fi_str, bbox in obj.get("frames", {}).items():
-            fi = int(fi_str)
-            if fi >= num_frames:
-                continue
-            x1, y1, x2, y2 = bbox
-            if all(0 <= v <= 1.0 for v in [x1, y1, x2, y2]):
-                x1, x2 = int(x1 * width), int(x2 * width)
-                y1, y2 = int(y1 * height), int(y2 * height)
-            else:
-                x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
-            x1, x2 = max(0, x1), min(width, x2)
-            y1, y2 = max(0, y1), min(height, y2)
-            if x2 > x1 and y2 > y1:
-                obj_mask[fi, 0, y1:y2, x1:x2] = True
-        obj_masks.append(obj_mask)
-
-    if not obj_masks:
-        return None
-    return torch.stack(obj_masks, dim=0)
-
-
 def build_object_masks_from_bbox_json_interpolated(json_str, num_frames, height, width):
     bbox_data = json.loads(json_str)
     objects = bbox_data.get("objects", [])
@@ -391,44 +361,6 @@ def build_video_rgb_from_bbox_motion(input_image, bbox_json_text, camera_json_te
         frames_out.append(torch.from_numpy(np.array(warped)).permute(2, 0, 1))
 
     return torch.stack(frames_out, dim=0)
-
-
-def build_track_video_preview(track_video, input_image=None, fps=15):
-    if track_video is None:
-        return None
-
-    track_video = track_video.detach().to("cpu", dtype=torch.float32)
-    if track_video.ndim == 5:
-        track_video = track_video[0]
-    track_video = track_video.abs().sum(dim=0)  # [T, H, W]
-
-    base_img = None
-    if input_image is not None:
-        base_img = input_image.copy().convert("RGB")
-
-    frames = []
-    for t in range(track_video.shape[0]):
-        frame = track_video[t]
-        frame = frame - frame.min()
-        denom = frame.max() - frame.min()
-        if denom > 0:
-            frame = frame / denom
-        frame = (frame * 255.0).clamp(0, 255).to(torch.uint8).numpy()
-        heat = Image.fromarray(frame, mode="L").convert("RGB")
-
-        if base_img is not None:
-            heat = heat.resize(base_img.size, Image.BILINEAR)
-            overlay = Image.blend(base_img, heat, alpha=0.5)
-            frames.append(overlay)
-        else:
-            frames.append(heat)
-
-    if not frames:
-        return None
-
-    preview_path = os.path.join(tempfile.gettempdir(), "track_video_preview.mp4")
-    save_video(frames, preview_path, fps=int(fps), quality=5)
-    return preview_path
 
 
 def compute_track_video(
@@ -649,134 +581,7 @@ def generate_point_json_from_editors(editor_start, editor_mid, editor_end, num_f
     return json.dumps({"points": tracks}, indent=2)
 
 
-def preview_motion_path(input_image, editor_start, editor_mid, editor_end, num_frames):
-    """在输入图像上叠加绘制各关键帧的 bbox 矩形，预览运动路径。"""
-    if input_image is None:
-        return None
-
-    nf = int(num_frames)
-    img = input_image.copy().convert("RGBA")
-    w, h = img.size
-
-    keyframes = [
-        (editor_start, (46, 204, 113),  f"起始帧 (F0)"),
-        (editor_mid,   (241, 196, 15),  f"中间帧 (F{nf // 2})"),
-        (editor_end,   (231, 76, 60),   f"结束帧 (F{nf - 1})"),
-    ]
-
-    overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
-    centers = []
-
-    for editor, color, label in keyframes:
-        bbox = extract_bbox_from_editor(editor)
-        if bbox is None:
-            continue
-        x1 = int(bbox[0] * w)
-        y1 = int(bbox[1] * h)
-        x2 = int(bbox[2] * w)
-        y2 = int(bbox[3] * h)
-
-        fill_layer = Image.new("RGBA", img.size, (0, 0, 0, 0))
-        fd = ImageDraw.Draw(fill_layer)
-        fd.rectangle([x1, y1, x2, y2], fill=(*color, 50))
-        overlay = Image.alpha_composite(overlay, fill_layer)
-
-        draw = ImageDraw.Draw(overlay)
-        draw.rectangle([x1, y1, x2, y2], outline=(*color, 220), width=3)
-        draw.text((x1 + 6, y1 + 6), label, fill=(*color, 255))
-
-        centers.append(((x1 + x2) // 2, (y1 + y2) // 2))
-
-    if len(centers) >= 2:
-        draw = ImageDraw.Draw(overlay)
-        for i in range(len(centers) - 1):
-            draw.line([centers[i], centers[i + 1]],
-                      fill=(255, 255, 255, 200), width=2)
-
-    result = Image.alpha_composite(img, overlay)
-    return result.convert("RGB")
-
-
 # ==================== Camera Motion Control ====================
-
-def build_camera_mask_from_json_str(json_str, num_frames, height, width):
-    """将相机 JSON 转换为张量。格式: {'camera': {'keyframes': [{'frame': 0, 'zoom': 1.0, 'pan': [0, 0], 'rotation': 0}, ...]}}"""
-    try:
-        camera_data = json.loads(json_str)
-        keyframes_list = camera_data.get("camera", {}).get("keyframes", [])
-    except:
-        return None
-
-    if not keyframes_list:
-        return None
-
-    # 创建张量存储相机参数 (1, 4, num_frames, height, width)
-    # 4 通道: zoom, pan_x, pan_y, rotation
-    mask = torch.zeros(1, 4, num_frames, height, width)
-
-    # 提取关键帧信息
-    kf_dict = {}
-    for kf in keyframes_list:
-        frame_idx = int(kf.get("frame", 0))
-        kf_dict[frame_idx] = {
-            "zoom": float(kf.get("zoom", 1.0)),
-            "pan_x": float(kf.get("pan", [0, 0])[0]),
-            "pan_y": float(kf.get("pan", [0, 0])[1]),
-            "rotation": float(kf.get("rotation", 0)),
-        }
-
-    # 线性插值填充所有帧
-    frame_indices = sorted(kf_dict.keys())
-    if not frame_indices:
-        return None
-
-    for frame_idx in range(num_frames):
-        # 找到相邻的关键帧
-        prev_idx = 0
-        next_idx = num_frames - 1
-        for idx in frame_indices:
-            if idx <= frame_idx:
-                prev_idx = idx
-            if idx >= frame_idx and next_idx == num_frames - 1:
-                next_idx = idx
-
-        if prev_idx == next_idx:
-            # 在一个关键帧处或之前
-            kf_data = kf_dict.get(prev_idx, {"zoom": 1.0, "pan_x": 0, "pan_y": 0, "rotation": 0})
-        else:
-            # 在两个关键帧之间线性插值
-            t = (frame_idx - prev_idx) / (next_idx - prev_idx)
-            prev_kf = kf_dict.get(prev_idx, {"zoom": 1.0, "pan_x": 0, "pan_y": 0, "rotation": 0})
-            next_kf = kf_dict.get(next_idx, {"zoom": 1.0, "pan_x": 0, "pan_y": 0, "rotation": 0})
-            kf_data = {
-                "zoom": prev_kf["zoom"] * (1 - t) + next_kf["zoom"] * t,
-                "pan_x": prev_kf["pan_x"] * (1 - t) + next_kf["pan_x"] * t,
-                "pan_y": prev_kf["pan_y"] * (1 - t) + next_kf["pan_y"] * t,
-                "rotation": prev_kf["rotation"] * (1 - t) + next_kf["rotation"] * t,
-            }
-
-        # 归一化到 [-1, 1] 范围
-        # zoom: 0.5-2.0 -> [-1, 1]
-        zoom_normalized = (kf_data["zoom"] - 0.5) / 0.75  # 1.0 -> 0, 0.5 -> -1, 2.0 -> 2
-        zoom_normalized = max(-1.0, min(1.0, zoom_normalized))
-
-        # pan: -100 to +100 -> [-1, 1]
-        pan_x_normalized = kf_data["pan_x"] / 100.0
-        pan_y_normalized = kf_data["pan_y"] / 100.0
-        pan_x_normalized = max(-1.0, min(1.0, pan_x_normalized))
-        pan_y_normalized = max(-1.0, min(1.0, pan_y_normalized))
-
-        # rotation: -45 to +45 -> [-1, 1]
-        rotation_normalized = kf_data["rotation"] / 45.0
-        rotation_normalized = max(-1.0, min(1.0, rotation_normalized))
-
-        mask[:, 0, frame_idx, :, :] = zoom_normalized
-        mask[:, 1, frame_idx, :, :] = pan_x_normalized
-        mask[:, 2, frame_idx, :, :] = pan_y_normalized
-        mask[:, 3, frame_idx, :, :] = rotation_normalized
-
-    return mask * 1.0
-
 
 def build_camera_params_from_json(json_str, num_frames):
     try:
@@ -853,85 +658,6 @@ def apply_camera_transform(image, zoom, pan_x, pan_y, rotation):
     shifted = Image.new("RGB", (w, h), (0, 0, 0))
     shifted.paste(rotated, (int(round(pan_x)), int(round(pan_y))))
     return shifted
-
-
-def transform_point(x, y, params, width, height):
-    cx = width / 2.0
-    cy = height / 2.0
-    dx = x - cx
-    dy = y - cy
-
-    zoom = params.get("zoom", 1.0)
-    dx *= zoom
-    dy *= zoom
-
-    rot = np.deg2rad(params.get("rotation", 0.0))
-    cos_r = np.cos(rot)
-    sin_r = np.sin(rot)
-    rx = dx * cos_r - dy * sin_r
-    ry = dx * sin_r + dy * cos_r
-
-    tx = rx + cx + params.get("pan_x", 0.0)
-    ty = ry + cy + params.get("pan_y", 0.0)
-    return tx, ty
-
-
-def build_interpolated_bboxes(json_str, num_frames, height, width):
-    if not json_str or not json_str.strip():
-        return None
-
-    bbox_data = json.loads(json_str)
-    objects = bbox_data.get("objects", [])
-    if not objects:
-        return None
-
-    all_boxes = []
-    for obj in objects:
-        frames = obj.get("frames", {})
-        if not frames:
-            continue
-
-        keyframes = []
-        for fi_str, bbox in frames.items():
-            fi = int(fi_str)
-            if fi >= num_frames:
-                continue
-            x1, y1, x2, y2 = bbox
-            if all(0 <= v <= 1.0 for v in [x1, y1, x2, y2]):
-                x1, x2 = x1 * width, x2 * width
-                y1, y2 = y1 * height, y2 * height
-            keyframes.append((fi, float(x1), float(y1), float(x2), float(y2)))
-
-        if not keyframes:
-            continue
-
-        keyframes = sorted(keyframes, key=lambda x: x[0])
-        per_frame = []
-        for f in range(num_frames):
-            if f <= keyframes[0][0]:
-                per_frame.append(keyframes[0][1:])
-                continue
-            if f >= keyframes[-1][0]:
-                per_frame.append(keyframes[-1][1:])
-                continue
-            for idx in range(len(keyframes) - 1):
-                f0, x10, y10, x20, y20 = keyframes[idx]
-                f1, x11, y11, x21, y21 = keyframes[idx + 1]
-                if f0 <= f <= f1:
-                    span = max(1, f1 - f0)
-                    t = (f - f0) / span
-                    x1 = x10 + (x11 - x10) * t
-                    y1 = y10 + (y11 - y10) * t
-                    x2 = x20 + (x21 - x20) * t
-                    y2 = y20 + (y21 - y20) * t
-                    per_frame.append((x1, y1, x2, y2))
-                    break
-
-        all_boxes.append(per_frame)
-
-    if not all_boxes:
-        return None
-    return all_boxes
 
 
 def build_point_tracks_from_json(json_str, num_frames, height, width):
@@ -1014,69 +740,6 @@ def build_point_masks_from_tracks(point_tracks, num_frames, height, width, radiu
     return torch.stack(masks, dim=0)
 
 
-def build_motion_signals_preview(
-    input_image,
-    camera_json_text,
-    bbox_json_text,
-    point_json_text,
-    num_frames,
-    height,
-    width,
-    fps,
-):
-    if input_image is None:
-        return None
-
-    base = input_image.resize((width, height)).convert("RGB")
-    camera_params = build_camera_params_from_json(camera_json_text, num_frames)
-    if camera_params is None:
-        camera_params = [
-            {"zoom": 1.0, "pan_x": 0.0, "pan_y": 0.0, "rotation": 0.0}
-            for _ in range(num_frames)
-        ]
-
-    bbox_tracks = build_interpolated_bboxes(bbox_json_text, num_frames, height, width)
-    point_tracks = build_point_tracks_from_json(point_json_text, num_frames, height, width)
-
-    frames = []
-    colors = [(255, 0, 0), (0, 255, 0), (0, 128, 255), (255, 128, 0)]
-    for f in range(num_frames):
-        params = camera_params[f]
-        frame = apply_camera_transform(base, params["zoom"], params["pan_x"], params["pan_y"], params["rotation"])
-        draw = ImageDraw.Draw(frame)
-
-        if bbox_tracks is not None:
-            for obj_idx, obj_frames in enumerate(bbox_tracks):
-                if f >= len(obj_frames):
-                    continue
-                x1, y1, x2, y2 = obj_frames[f]
-                p1 = transform_point(x1, y1, params, width, height)
-                p2 = transform_point(x2, y2, params, width, height)
-                x_min = max(0, min(width, int(round(min(p1[0], p2[0])))))
-                y_min = max(0, min(height, int(round(min(p1[1], p2[1])))))
-                x_max = max(0, min(width, int(round(max(p1[0], p2[0])))))
-                y_max = max(0, min(height, int(round(max(p1[1], p2[1])))))
-                draw.rectangle([x_min, y_min, x_max, y_max], outline=colors[obj_idx % len(colors)], width=3)
-
-        if point_tracks is not None:
-            for pt_idx, pt_frames in enumerate(point_tracks):
-                if f >= len(pt_frames):
-                    continue
-                x, y = pt_frames[f]
-                tx, ty = transform_point(x, y, params, width, height)
-                r = 4
-                draw.ellipse([tx - r, ty - r, tx + r, ty + r], fill=colors[pt_idx % len(colors)])
-
-        frames.append(frame)
-
-    if not frames:
-        return None
-
-    preview_path = os.path.join(tempfile.gettempdir(), "motion_signals_preview.mp4")
-    save_video(frames, preview_path, fps=int(fps), quality=5)
-    return preview_path
-
-
 def generate_camera_json_from_sliders(zoom_start, pan_x_start, pan_y_start, rotation_start,
                                       zoom_mid, pan_x_mid, pan_y_mid, rotation_mid,
                                       zoom_end, pan_x_end, pan_y_end, rotation_end, num_frames):
@@ -1088,74 +751,6 @@ def generate_camera_json_from_sliders(zoom_start, pan_x_start, pan_y_start, rota
         {"frame": nf - 1, "zoom": zoom_end, "pan": [pan_x_end, pan_y_end], "rotation": rotation_end},
     ]
     return json.dumps({"camera": {"keyframes": keyframes}}, indent=2)
-
-
-def preview_camera_motion(input_image, zoom_start, pan_x_start, pan_y_start, rotation_start,
-                          zoom_mid, pan_x_mid, pan_y_mid, rotation_mid,
-                          zoom_end, pan_x_end, pan_y_end, rotation_end, num_frames):
-    """在输入图像上叠加绘制相机轨迹预览。显示视口矩形和轨迹线。"""
-    if input_image is None:
-        return None
-
-    nf = int(num_frames)
-    img = input_image.copy().convert("RGBA")
-    w, h = img.size
-
-    # 定义三个关键帧的相机参数
-    keyframes = [
-        (zoom_start, pan_x_start, pan_y_start, rotation_start, (76, 175, 255), "起始帧 (F0)"),
-        (zoom_mid, pan_x_mid, pan_y_mid, rotation_mid, (255, 193, 7), f"中间帧 (F{nf // 2})"),
-        (zoom_end, pan_x_end, pan_y_end, rotation_end, (244, 67, 54), f"结束帧 (F{nf - 1})"),
-    ]
-
-    overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
-    centers = []
-    draw_overlay = ImageDraw.Draw(overlay)
-
-    for zoom, pan_x, pan_y, rotation, color, label in keyframes:
-        # 计算视口矩形
-        # zoom: 1.0 = original, 0.5 = 2x zoomed out (larger rect), 2.0 = 2x zoomed in (smaller rect)
-        viewport_w = w / zoom
-        viewport_h = h / zoom
-
-        # 计算视口左上角位置 (基于 pan 和中心)
-        center_x = w / 2 + pan_x
-        center_y = h / 2 + pan_y
-
-        x1 = int(center_x - viewport_w / 2)
-        y1 = int(center_y - viewport_h / 2)
-        x2 = int(center_x + viewport_w / 2)
-        y2 = int(center_y + viewport_h / 2)
-
-        # 裁剪到图像边界
-        x1 = max(0, x1)
-        y1 = max(0, y1)
-        x2 = min(w, x2)
-        y2 = min(h, y2)
-
-        # 绘制半透明矩形
-        fill_layer = Image.new("RGBA", img.size, (0, 0, 0, 0))
-        fd = ImageDraw.Draw(fill_layer)
-        fd.rectangle([x1, y1, x2, y2], fill=(*color, 40))
-        overlay = Image.alpha_composite(overlay, fill_layer)
-
-        # 绘制矩形边框
-        draw_overlay.rectangle([x1, y1, x2, y2], outline=(*color, 200), width=2)
-
-        # 添加标签
-        draw_overlay.text((x1 + 6, y1 + 6), label, fill=(*color, 255))
-
-        # 记录中心点用于绘制轨迹线
-        centers.append((center_x, center_y))
-
-    # 绘制轨迹线连接各关键帧
-    if len(centers) >= 2:
-        for i in range(len(centers) - 1):
-            draw_overlay.line([centers[i], centers[i + 1]],
-                             fill=(255, 255, 255, 180), width=3)
-
-    result = Image.alpha_composite(img, overlay)
-    return result.convert("RGB")
 
 
 # ==================== Video Generation ====================
@@ -1252,86 +847,13 @@ def generate_video(
 
     output_path = os.path.join(tempfile.gettempdir(), "motioncanvas_output.mp4")
     save_video(video_frames[0], output_path, fps=int(fps), quality=5)
-    track_preview_path = build_track_video_preview(track_video, input_image=input_image, fps=fps)
     if not debug_lines:
         debug_lines.append("track_video not provided and not generated")
 
     for line in debug_lines:
         print(line)
 
-    return output_path, track_preview_path
-
-
-def preview_track_video(
-    input_image,
-    end_image,
-    height,
-    width,
-    num_frames,
-    fps,
-    bbox_mask_file,
-    bbox_json_text,
-    camera_json_text,
-    point_json_text,
-):
-    if pipe_state["pipe"] is None:
-        raise gr.Error("请先加载模型！")
-
-    pipe = pipe_state["pipe"]
-    torch_dtype = pipe_state["torch_dtype"]
-    device = pipe.device
-
-    bbox_mask = None
-    if bbox_mask_file is not None:
-        bbox_mask = torch.load(bbox_mask_file, map_location="cpu")
-        bbox_mask = bbox_mask.to(dtype=torch_dtype, device=device)
-    elif bbox_json_text and bbox_json_text.strip():
-        bbox_mask = build_bbox_mask_from_json_str(
-            bbox_json_text, int(num_frames), int(height), int(width)
-        )
-        bbox_mask = bbox_mask.to(dtype=torch_dtype, device=device)
-
-    track_video = compute_track_video(
-        pipe,
-        torch_dtype,
-        device,
-        bbox_mask,
-        bbox_json_text,
-        camera_json_text,
-        point_json_text,
-        input_image,
-        end_image,
-        num_frames,
-        height,
-        width,
-    )
-
-    return build_track_video_preview(track_video, input_image=input_image, fps=fps)
-
-
-def preview_motion_signals(
-    input_image,
-    camera_json_text,
-    bbox_json_text,
-    point_json_text,
-    num_frames,
-    height,
-    width,
-    fps,
-):
-    if input_image is None:
-        raise gr.Error("请先上传输入图像！")
-
-    return build_motion_signals_preview(
-        input_image,
-        camera_json_text,
-        bbox_json_text,
-        point_json_text,
-        int(num_frames),
-        int(height),
-        int(width),
-        fps,
-    )
+    return output_path
 
 
 # ==================== UI ====================
@@ -1535,12 +1057,6 @@ with gr.Blocks(
                             extract_btn = gr.Button(
                                 "提取选区 → 生成 JSON", variant="secondary",
                             )
-                            preview_btn = gr.Button(
-                                "预览运动路径", variant="secondary",
-                            )
-                        motion_preview = gr.Image(
-                            label="运动路径预览", interactive=False,
-                        )
 
                     # ---- 局部运动 Tab ----
                     with gr.Tab("局部运动"):
@@ -1659,12 +1175,6 @@ with gr.Blocks(
                             camera_extract_btn = gr.Button(
                                 "生成相机 JSON", variant="secondary",
                             )
-                            camera_preview_btn = gr.Button(
-                                "预览相机轨迹", variant="secondary",
-                            )
-                        camera_motion_preview = gr.Image(
-                            label="相机轨迹预览", interactive=False,
-                        )
 
                     # ---- JSON / 高级 Tab ----
                     with gr.Tab("JSON / 高级选项"):
@@ -1718,10 +1228,6 @@ with gr.Blocks(
                 elem_classes="generate-btn",
             )
             output_video = gr.Video(label="生成结果", interactive=False)
-            track_preview = gr.Video(label="Track Video 预览", interactive=False)
-            motion_signals_preview = gr.Video(label="Motion Signals 预览", interactive=False)
-            track_preview_btn = gr.Button("预览 Track Video", variant="secondary")
-            motion_preview_btn = gr.Button("预览 Motion Signals", variant="secondary")
 
     # ---- 事件绑定 ----
 
@@ -1741,21 +1247,11 @@ with gr.Blocks(
         fn=generate_bbox_json_from_editors,
         inputs=[editor_start, editor_mid, editor_end, num_frames],
         outputs=[bbox_json_text],
-    ).then(
-        fn=preview_motion_path,
-        inputs=[input_image, editor_start, editor_mid, editor_end, num_frames],
-        outputs=[motion_preview],
     )
     point_extract_btn.click(
         fn=generate_point_json_from_editors,
         inputs=[point_editor_start, point_editor_mid, point_editor_end, num_frames],
         outputs=[point_json_text],
-    )
-
-    preview_btn.click(
-        fn=preview_motion_path,
-        inputs=[input_image, editor_start, editor_mid, editor_end, num_frames],
-        outputs=[motion_preview],
     )
 
     # ---- 相机运动事件绑定 ----
@@ -1768,28 +1264,6 @@ with gr.Blocks(
             num_frames,
         ],
         outputs=[camera_json_text],
-    ).then(
-        fn=preview_camera_motion,
-        inputs=[
-            input_image,
-            camera_zoom_start, camera_pan_x_start, camera_pan_y_start, camera_rotation_start,
-            camera_zoom_mid, camera_pan_x_mid, camera_pan_y_mid, camera_rotation_mid,
-            camera_zoom_end, camera_pan_x_end, camera_pan_y_end, camera_rotation_end,
-            num_frames,
-        ],
-        outputs=[camera_motion_preview],
-    )
-
-    camera_preview_btn.click(
-        fn=preview_camera_motion,
-        inputs=[
-            input_image,
-            camera_zoom_start, camera_pan_x_start, camera_pan_y_start, camera_rotation_start,
-            camera_zoom_mid, camera_pan_x_mid, camera_pan_y_mid, camera_rotation_mid,
-            camera_zoom_end, camera_pan_x_end, camera_pan_y_end, camera_rotation_end,
-            num_frames,
-        ],
-        outputs=[camera_motion_preview],
     )
 
     generate_btn.click(
@@ -1801,32 +1275,7 @@ with gr.Blocks(
             cfg_scale, sigma_shift, seed, fps,
             bbox_mask_file, track_video_file, bbox_json_text, camera_json_text, point_json_text,
         ],
-        outputs=[output_video, track_preview],
-    )
-
-    track_preview_btn.click(
-        fn=preview_track_video,
-        inputs=[
-            input_image, end_image,
-            height, width, num_frames, fps,
-            bbox_mask_file, bbox_json_text, camera_json_text, point_json_text,
-        ],
-        outputs=track_preview,
-    )
-
-    motion_preview_btn.click(
-        fn=preview_motion_signals,
-        inputs=[
-            input_image,
-            camera_json_text,
-            bbox_json_text,
-            point_json_text,
-            num_frames,
-            height,
-            width,
-            fps,
-        ],
-        outputs=motion_signals_preview,
+        outputs=[output_video],
     )
 
 
