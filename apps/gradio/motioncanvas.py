@@ -678,7 +678,10 @@ def generate_video(
     if not debug_lines:
         debug_lines.append("track_video not provided and not generated")
 
-    return output_path, "\n".join(debug_lines)
+    for line in debug_lines:
+        print(line)
+
+    return output_path
 
 
 # ==================== UI ====================
@@ -984,9 +987,6 @@ with gr.Blocks(
                 elem_classes="generate-btn",
             )
             output_video = gr.Video(label="生成结果", interactive=False)
-            debug_info = gr.Textbox(
-                label="调试信息", lines=6, interactive=False
-            )
 
     # ---- 事件绑定 ----
 
@@ -1061,7 +1061,7 @@ with gr.Blocks(
             cfg_scale, sigma_shift, seed, fps,
             bbox_mask_file, track_video_file, bbox_json_text, camera_json_text,
         ],
-        outputs=[output_video, debug_info],
+        outputs=output_video,
     )
 
 
