@@ -16,6 +16,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 import gradio as gr
 from diffsynth import ModelManager, save_video
 from diffsynth.pipelines.wan_video_motioncanvas import WanVideoPipeline_motioncanvas
+from diffsynth.pipelines.tracker_utils import get_video_track_video
 
 DEFAULT_NEGATIVE_PROMPT = (
     "Bright tones, overexposed, static, blurred details, subtitles, style, works, "
@@ -78,7 +79,7 @@ CUSTOM_CSS = """
 }
 """
 
-pipe_state = {"pipe": None, "torch_dtype": None, "loaded_config": None}
+pipe_state = {"pipe": None, "torch_dtype": None, "loaded_config": None, "cotracker": None}
 
 
 # ==================== Model Loading ====================
@@ -192,6 +193,77 @@ def build_bbox_mask_from_json_str(json_str, num_frames, height, width):
             y1, y2 = max(0, y1), min(height, y2)
             mask[:, :, fi, y1:y2, x1:x2] = 1.0
     return mask * 2.0 - 1.0
+
+
+def build_object_masks_from_bbox_json(json_str, num_frames, height, width):
+    bbox_data = json.loads(json_str)
+    objects = bbox_data.get("objects", [])
+    if not objects:
+        return None
+
+    obj_masks = []
+    for obj in objects:
+        obj_mask = torch.zeros(num_frames, 1, height, width, dtype=torch.bool)
+        for fi_str, bbox in obj.get("frames", {}).items():
+            fi = int(fi_str)
+            if fi >= num_frames:
+                continue
+            x1, y1, x2, y2 = bbox
+            if all(0 <= v <= 1.0 for v in [x1, y1, x2, y2]):
+                x1, x2 = int(x1 * width), int(x2 * width)
+                y1, y2 = int(y1 * height), int(y2 * height)
+            else:
+                x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
+            x1, x2 = max(0, x1), min(width, x2)
+            y1, y2 = max(0, y1), min(height, y2)
+            if x2 > x1 and y2 > y1:
+                obj_mask[fi, 0, y1:y2, x1:x2] = True
+        obj_masks.append(obj_mask)
+
+    if not obj_masks:
+        return None
+    return torch.stack(obj_masks, dim=0)
+
+
+def build_video_rgb_from_images(input_image, end_image, num_frames, height, width):
+    if input_image is None:
+        return None
+
+    def to_frame(img):
+        img = img.resize((width, height)).convert("RGB")
+        arr = np.array(img)
+        return torch.from_numpy(arr).permute(2, 0, 1)
+
+    first_frame = to_frame(input_image)
+    frames = [first_frame] * int(num_frames)
+    if end_image is not None:
+        frames[-1] = to_frame(end_image)
+    return torch.stack(frames, dim=0)
+
+
+def load_cotracker(device, dtype):
+    if pipe_state.get("cotracker") is not None:
+        return pipe_state["cotracker"]
+
+    cotracker_local = os.environ.get("COTRACKER_HUB_DIR")
+    if cotracker_local and os.path.isdir(os.path.join(cotracker_local, "facebookresearch_co-tracker_main")):
+        torch.hub.set_dir(cotracker_local)
+        cotracker = torch.hub.load(
+            os.path.join(cotracker_local, "facebookresearch_co-tracker_main"),
+            "cotracker3_offline",
+            source="local",
+        )
+    else:
+        cotracker = torch.hub.load(
+            "facebookresearch/co-tracker",
+            "cotracker3_offline",
+            trust_repo=True,
+        )
+
+    cotracker = cotracker.to(device=device, dtype=dtype)
+    cotracker.requires_grad_(False)
+    pipe_state["cotracker"] = cotracker
+    return cotracker
 
 
 def extract_bbox_from_editor(editor_data):
@@ -514,6 +586,51 @@ def generate_video(
     if track_video_file is not None:
         track_video = torch.load(track_video_file, map_location="cpu")
         track_video = track_video.to(dtype=torch_dtype, device=device)
+
+    if track_video is None and bbox_mask is not None:
+        object_masks = None
+        if bbox_json_text and bbox_json_text.strip():
+            try:
+                object_masks = build_object_masks_from_bbox_json(
+                    bbox_json_text, int(num_frames), int(height), int(width)
+                )
+            except Exception as e:
+                raise gr.Error(f"Object masks 解析失败: {e}")
+
+        if object_masks is None:
+            if bbox_mask.ndim == 5:
+                merged = (bbox_mask.squeeze(0) > 0).any(dim=0, keepdim=True)
+            else:
+                merged = (bbox_mask > 0).any(dim=0, keepdim=True)
+            object_masks = merged.unsqueeze(0).to(dtype=torch.bool)
+
+        reference_imgs_indicator = [object_masks.shape[0]]
+        video_rgb = build_video_rgb_from_images(
+            input_image, end_image, int(num_frames), int(height), int(width)
+        )
+
+        if video_rgb is not None:
+            tiler_kwargs = {"tiled": True, "tile_size": (30, 52), "tile_stride": (15, 26)}
+            pipe.load_models_to_device(["vae"])
+            bbox_latents = pipe.encode_video(bbox_mask, **tiler_kwargs)
+            lat_c = bbox_latents.shape[1]
+
+            cotracker = load_cotracker(device=device, dtype=torch.float32)
+            video_rgb = video_rgb.unsqueeze(0).to(device=device, dtype=torch.float32)
+            object_masks = object_masks.to(device=device)
+
+            object_masks_per_sample = torch.split(object_masks, reference_imgs_indicator, dim=0)
+            track_video, _, _ = get_video_track_video(
+                cotracker,
+                video_rgb,
+                object_masks_per_sample,
+                pipe.downsample_ratios,
+                lat_c,
+                grid_size=12,
+                device=device,
+                dtype=torch.float32,
+            )
+            track_video = track_video.to(dtype=torch_dtype, device=device)
 
     # 构建管道参数
     pipeline_kwargs = {
