@@ -1,8 +1,10 @@
 #!/bin/bash
 # MotionCanvas 模型下载脚本
-# 需要下载两个模型：
+# 需要下载四类模型：
 #   1. Wan2.1-Fun-1.3B-InP 基础模型 (~19GB)
-#   2. MotionCanvas 预训练权重   (~3.1GB)
+#   2. Wan2.1 1.3B Motion Controller (~几百 MB)
+#   3. Wan2.1 1.3B VACE (~数 GB)
+#   4. MotionCanvas 预训练权重   (~3.1GB)
 #
 # 使用方法:
 #   bash download_models.sh              # 默认从 ModelScope 下载
@@ -34,6 +36,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 mkdir -p "${MODEL_DIR}/wan_1.3b"
+mkdir -p "${MODEL_DIR}/DiffSynth-Studio/Wan2.1-1.3b-speedcontrol-v1"
+mkdir -p "${MODEL_DIR}/iic/VACE-Wan2.1-1.3B-Preview"
 mkdir -p "${MODEL_DIR}/motioncanvas"
 
 echo "============================================"
@@ -64,10 +68,48 @@ fi
 echo "[1/2] Wan2.1-Fun-1.3B-InP 下载完成！"
 
 # -----------------------------------------------
-# 2. 下载 MotionCanvas 预训练权重
+# 2. 下载 Wan2.1 1.3B Motion Controller
 # -----------------------------------------------
 echo ""
-echo "[2/2] 下载 MotionCanvas 预训练权重 (~3.1GB) ..."
+echo "[2/4] 下载 Wan2.1 1.3B Motion Controller ..."
+
+if [ "$SOURCE" = "modelscope" ]; then
+    modelscope download \
+        --model DiffSynth-Studio/Wan2.1-1.3b-speedcontrol-v1 \
+        --local_dir "${MODEL_DIR}/DiffSynth-Studio/Wan2.1-1.3b-speedcontrol-v1"
+elif [ "$SOURCE" = "hf" ]; then
+    echo "注意: Wan2.1 1.3B Motion Controller 目前按 ModelScope 路径下载，自动切换到 ModelScope..."
+    modelscope download \
+        --model DiffSynth-Studio/Wan2.1-1.3b-speedcontrol-v1 \
+        --local_dir "${MODEL_DIR}/DiffSynth-Studio/Wan2.1-1.3b-speedcontrol-v1"
+fi
+
+echo "[2/4] Wan2.1 1.3B Motion Controller 下载完成！"
+
+# -----------------------------------------------
+# 3. 下载 Wan2.1 1.3B VACE
+# -----------------------------------------------
+echo ""
+echo "[3/4] 下载 Wan2.1 1.3B VACE ..."
+
+if [ "$SOURCE" = "modelscope" ]; then
+    modelscope download \
+        --model iic/VACE-Wan2.1-1.3B-Preview \
+        --local_dir "${MODEL_DIR}/iic/VACE-Wan2.1-1.3B-Preview"
+elif [ "$SOURCE" = "hf" ]; then
+    echo "注意: Wan2.1 1.3B VACE 目前按 ModelScope 路径下载，自动切换到 ModelScope..."
+    modelscope download \
+        --model iic/VACE-Wan2.1-1.3B-Preview \
+        --local_dir "${MODEL_DIR}/iic/VACE-Wan2.1-1.3B-Preview"
+fi
+
+echo "[3/4] Wan2.1 1.3B VACE 下载完成！"
+
+# -----------------------------------------------
+# 4. 下载 MotionCanvas 预训练权重
+# -----------------------------------------------
+echo ""
+echo "[4/4] 下载 MotionCanvas 预训练权重 (~3.1GB) ..."
 
 if [ "$SOURCE" = "modelscope" ]; then
     modelscope download \
@@ -80,7 +122,7 @@ elif [ "$SOURCE" = "hf" ]; then
         --local_dir "${MODEL_DIR}/motioncanvas"
 fi
 
-echo "[2/2] MotionCanvas 权重下载完成！"
+echo "[4/4] MotionCanvas 权重下载完成！"
 
 # -----------------------------------------------
 # 验证文件完整性
@@ -107,6 +149,16 @@ check_file "${MODEL_DIR}/wan_1.3b/models_t5_umt5-xxl-enc-bf16.pth"
 check_file "${MODEL_DIR}/wan_1.3b/Wan2.1_VAE.pth"
 check_file "${MODEL_DIR}/wan_1.3b/diffusion_pytorch_model.safetensors"
 check_file "${MODEL_DIR}/wan_1.3b/models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth"
+
+echo ""
+echo "Wan2.1 1.3B Motion Controller:"
+check_file "${MODEL_DIR}/DiffSynth-Studio/Wan2.1-1.3b-speedcontrol-v1/model.safetensors"
+
+echo ""
+echo "Wan2.1 1.3B VACE:"
+check_file "${MODEL_DIR}/iic/VACE-Wan2.1-1.3B-Preview/diffusion_pytorch_model.safetensors"
+check_file "${MODEL_DIR}/iic/VACE-Wan2.1-1.3B-Preview/models_t5_umt5-xxl-enc-bf16.pth"
+check_file "${MODEL_DIR}/iic/VACE-Wan2.1-1.3B-Preview/Wan2.1_VAE.pth"
 
 echo ""
 echo "MotionCanvas:"
