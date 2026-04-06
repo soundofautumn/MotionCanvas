@@ -241,7 +241,7 @@ def build_video_rgb_from_images(input_image, end_image, num_frames, height, widt
     return torch.stack(frames, dim=0)
 
 
-def build_track_video_preview(track_video, fps=15):
+def build_track_video_preview(track_video, input_image=None, fps=15):
     if track_video is None:
         return None
 
@@ -249,6 +249,10 @@ def build_track_video_preview(track_video, fps=15):
     if track_video.ndim == 5:
         track_video = track_video[0]
     track_video = track_video.abs().sum(dim=0)  # [T, H, W]
+
+    base_img = None
+    if input_image is not None:
+        base_img = input_image.copy().convert("RGB")
 
     frames = []
     for t in range(track_video.shape[0]):
@@ -258,7 +262,14 @@ def build_track_video_preview(track_video, fps=15):
         if denom > 0:
             frame = frame / denom
         frame = (frame * 255.0).clamp(0, 255).to(torch.uint8).numpy()
-        frames.append(Image.fromarray(frame, mode="L").convert("RGB"))
+        heat = Image.fromarray(frame, mode="L").convert("RGB")
+
+        if base_img is not None:
+            heat = heat.resize(base_img.size, Image.BILINEAR)
+            overlay = Image.blend(base_img, heat, alpha=0.5)
+            frames.append(overlay)
+        else:
+            frames.append(heat)
 
     if not frames:
         return None
@@ -266,6 +277,65 @@ def build_track_video_preview(track_video, fps=15):
     preview_path = os.path.join(tempfile.gettempdir(), "track_video_preview.mp4")
     save_video(frames, preview_path, fps=int(fps), quality=5)
     return preview_path
+
+
+def compute_track_video(
+    pipe,
+    torch_dtype,
+    device,
+    bbox_mask,
+    bbox_json_text,
+    input_image,
+    end_image,
+    num_frames,
+    height,
+    width,
+):
+    if bbox_mask is None:
+        return None
+
+    object_masks = None
+    if bbox_json_text and bbox_json_text.strip():
+        object_masks = build_object_masks_from_bbox_json(
+            bbox_json_text, int(num_frames), int(height), int(width)
+        )
+
+    if object_masks is None:
+        if bbox_mask.ndim == 5:
+            merged = (bbox_mask.squeeze(0) > 0).any(dim=0, keepdim=True)
+        else:
+            merged = (bbox_mask > 0).any(dim=0, keepdim=True)
+        object_masks = merged.unsqueeze(0).to(dtype=torch.bool)
+
+    reference_imgs_indicator = [object_masks.shape[0]]
+    video_rgb = build_video_rgb_from_images(
+        input_image, end_image, int(num_frames), int(height), int(width)
+    )
+    if video_rgb is None:
+        return None
+
+    tiler_kwargs = {"tiled": True, "tile_size": (30, 52), "tile_stride": (15, 26)}
+    pipe.load_models_to_device(["vae"])
+    bbox_latents = pipe.encode_video(bbox_mask, **tiler_kwargs)
+    lat_c = bbox_latents.shape[1]
+
+    device_obj = torch.device(device)
+    cotracker = load_cotracker(device=device_obj, dtype=torch.float32)
+    video_rgb = video_rgb.unsqueeze(0).to(device=device_obj, dtype=torch.float32)
+    object_masks = object_masks.to(device=device_obj)
+
+    object_masks_per_sample = torch.split(object_masks, reference_imgs_indicator, dim=0)
+    track_video, _, _ = get_video_track_video(
+        cotracker,
+        video_rgb,
+        object_masks_per_sample,
+        pipe.downsample_ratios,
+        lat_c,
+        grid_size=12,
+        device=device_obj,
+        dtype=torch.float32,
+    )
+    return track_video.to(dtype=torch_dtype, device=device)
 
 
 def load_cotracker(device, dtype):
@@ -619,58 +689,25 @@ def generate_video(
         )
 
     if track_video is None and bbox_mask is not None:
-        object_masks = None
-        if bbox_json_text and bbox_json_text.strip():
-            try:
-                object_masks = build_object_masks_from_bbox_json(
-                    bbox_json_text, int(num_frames), int(height), int(width)
-                )
-            except Exception as e:
-                raise gr.Error(f"Object masks 解析失败: {e}")
+        try:
+            track_video = compute_track_video(
+                pipe,
+                torch_dtype,
+                device,
+                bbox_mask,
+                bbox_json_text,
+                input_image,
+                end_image,
+                num_frames,
+                height,
+                width,
+            )
+        except Exception as e:
+            raise gr.Error(f"Track video 生成失败: {e}")
 
-        if object_masks is None:
-            if bbox_mask.ndim == 5:
-                merged = (bbox_mask.squeeze(0) > 0).any(dim=0, keepdim=True)
-            else:
-                merged = (bbox_mask > 0).any(dim=0, keepdim=True)
-            object_masks = merged.unsqueeze(0).to(dtype=torch.bool)
-
-        reference_imgs_indicator = [object_masks.shape[0]]
-        video_rgb = build_video_rgb_from_images(
-            input_image, end_image, int(num_frames), int(height), int(width)
-        )
-
-        if video_rgb is None:
+        if track_video is None:
             debug_lines.append("track_video skipped: video_rgb is None")
-
-        if video_rgb is not None:
-            tiler_kwargs = {"tiled": True, "tile_size": (30, 52), "tile_stride": (15, 26)}
-            pipe.load_models_to_device(["vae"])
-            bbox_latents = pipe.encode_video(bbox_mask, **tiler_kwargs)
-            lat_c = bbox_latents.shape[1]
-
-            debug_lines.append(
-                f"auto track inputs: video_rgb={tuple(video_rgb.shape)}, object_masks={tuple(object_masks.shape)}, "
-                f"reference_imgs_indicator={reference_imgs_indicator}, lat_c={lat_c}"
-            )
-
-            device_obj = torch.device(device)
-            cotracker = load_cotracker(device=device_obj, dtype=torch.float32)
-            video_rgb = video_rgb.unsqueeze(0).to(device=device_obj, dtype=torch.float32)
-            object_masks = object_masks.to(device=device_obj)
-
-            object_masks_per_sample = torch.split(object_masks, reference_imgs_indicator, dim=0)
-            track_video, _, _ = get_video_track_video(
-                cotracker,
-                video_rgb,
-                object_masks_per_sample,
-                pipe.downsample_ratios,
-                lat_c,
-                grid_size=12,
-                device=device_obj,
-                dtype=torch.float32,
-            )
-            track_video = track_video.to(dtype=torch_dtype, device=device)
+        else:
             debug_lines.append(
                 f"track_video generated: shape={tuple(track_video.shape)}, dtype={track_video.dtype}, device={track_video.device}"
             )
@@ -703,7 +740,7 @@ def generate_video(
 
     output_path = os.path.join(tempfile.gettempdir(), "motioncanvas_output.mp4")
     save_video(video_frames[0], output_path, fps=int(fps), quality=5)
-    track_preview_path = build_track_video_preview(track_video, fps=fps)
+    track_preview_path = build_track_video_preview(track_video, input_image=input_image, fps=fps)
     if not debug_lines:
         debug_lines.append("track_video not provided and not generated")
 
@@ -711,6 +748,49 @@ def generate_video(
         print(line)
 
     return output_path, track_preview_path
+
+
+def preview_track_video(
+    input_image,
+    end_image,
+    height,
+    width,
+    num_frames,
+    fps,
+    bbox_mask_file,
+    bbox_json_text,
+):
+    if pipe_state["pipe"] is None:
+        raise gr.Error("请先加载模型！")
+
+    pipe = pipe_state["pipe"]
+    torch_dtype = pipe_state["torch_dtype"]
+    device = pipe.device
+
+    bbox_mask = None
+    if bbox_mask_file is not None:
+        bbox_mask = torch.load(bbox_mask_file, map_location="cpu")
+        bbox_mask = bbox_mask.to(dtype=torch_dtype, device=device)
+    elif bbox_json_text and bbox_json_text.strip():
+        bbox_mask = build_bbox_mask_from_json_str(
+            bbox_json_text, int(num_frames), int(height), int(width)
+        )
+        bbox_mask = bbox_mask.to(dtype=torch_dtype, device=device)
+
+    track_video = compute_track_video(
+        pipe,
+        torch_dtype,
+        device,
+        bbox_mask,
+        bbox_json_text,
+        input_image,
+        end_image,
+        num_frames,
+        height,
+        width,
+    )
+
+    return build_track_video_preview(track_video, input_image=input_image, fps=fps)
 
 
 # ==================== UI ====================
@@ -1017,6 +1097,7 @@ with gr.Blocks(
             )
             output_video = gr.Video(label="生成结果", interactive=False)
             track_preview = gr.Video(label="Track Video 预览", interactive=False)
+            track_preview_btn = gr.Button("预览 Track Video", variant="secondary")
 
     # ---- 事件绑定 ----
 
@@ -1092,6 +1173,16 @@ with gr.Blocks(
             bbox_mask_file, track_video_file, bbox_json_text, camera_json_text,
         ],
         outputs=[output_video, track_preview],
+    )
+
+    track_preview_btn.click(
+        fn=preview_track_video,
+        inputs=[
+            input_image, end_image,
+            height, width, num_frames, fps,
+            bbox_mask_file, bbox_json_text,
+        ],
+        outputs=track_preview,
     )
 
 
