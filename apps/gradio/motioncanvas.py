@@ -312,7 +312,7 @@ def build_video_rgb_from_images(input_image, end_image, num_frames, height, widt
     return torch.stack(frames, dim=0)
 
 
-def build_video_rgb_from_bbox_motion(input_image, bbox_json_text, num_frames, height, width):
+def build_video_rgb_from_bbox_motion(input_image, bbox_json_text, camera_json_text, num_frames, height, width):
     if input_image is None:
         return None
 
@@ -344,6 +344,12 @@ def build_video_rgb_from_bbox_motion(input_image, bbox_json_text, num_frames, he
 
     keyframes = sorted(keyframes, key=lambda x: x[0])
     base = input_image.resize((width, height)).convert("RGB")
+    camera_params = build_camera_params_from_json(camera_json_text, num_frames)
+    if camera_params is None:
+        camera_params = [
+            {"zoom": 1.0, "pan_x": 0.0, "pan_y": 0.0, "rotation": 0.0}
+            for _ in range(num_frames)
+        ]
 
     def interp_bbox(f):
         if f <= keyframes[0][0]:
@@ -374,7 +380,15 @@ def build_video_rgb_from_bbox_motion(input_image, bbox_json_text, num_frames, he
         dy = base_cy - cy
         shifted = Image.new("RGB", (width, height), (0, 0, 0))
         shifted.paste(base, (int(round(dx)), int(round(dy))))
-        frames_out.append(torch.from_numpy(np.array(shifted)).permute(2, 0, 1))
+        params = camera_params[f]
+        warped = apply_camera_transform(
+            shifted,
+            params["zoom"],
+            params["pan_x"],
+            params["pan_y"],
+            params["rotation"],
+        )
+        frames_out.append(torch.from_numpy(np.array(warped)).permute(2, 0, 1))
 
     return torch.stack(frames_out, dim=0)
 
@@ -423,6 +437,8 @@ def compute_track_video(
     device,
     bbox_mask,
     bbox_json_text,
+    camera_json_text,
+    point_json_text,
     input_image,
     end_image,
     num_frames,
@@ -445,9 +461,15 @@ def compute_track_video(
             merged = (bbox_mask > 0).any(dim=0, keepdim=True)
         object_masks = merged.unsqueeze(0).to(dtype=torch.bool)
 
+    point_tracks = build_point_tracks_from_json(point_json_text, int(num_frames), int(height), int(width))
+    if point_tracks is not None:
+        point_masks = build_point_masks_from_tracks(point_tracks, int(num_frames), int(height), int(width), radius=6)
+        if point_masks is not None:
+            object_masks = torch.cat([object_masks, point_masks], dim=0)
+
     reference_imgs_indicator = [object_masks.shape[0]]
     video_rgb = build_video_rgb_from_bbox_motion(
-        input_image, bbox_json_text, int(num_frames), int(height), int(width)
+        input_image, bbox_json_text, camera_json_text, int(num_frames), int(height), int(width)
     )
     if video_rgb is None:
         video_rgb = build_video_rgb_from_images(
@@ -539,12 +561,43 @@ def extract_bbox_from_editor(editor_data):
     return None
 
 
+def extract_points_from_editor(editor_data, max_points=20):
+    if editor_data is None:
+        return []
+    layers = editor_data.get("layers", [])
+    if not layers:
+        return []
+
+    points = []
+    for layer in layers:
+        if not isinstance(layer, np.ndarray):
+            continue
+        if layer.ndim == 3 and layer.shape[2] >= 4:
+            alpha = layer[:, :, 3]
+        elif layer.ndim == 3:
+            alpha = np.any(layer > 0, axis=2).astype(np.uint8) * 255
+        elif layer.ndim == 2:
+            alpha = layer
+        else:
+            continue
+        coords = np.argwhere(alpha > 0)
+        if coords.size == 0:
+            continue
+        if coords.shape[0] > max_points:
+            idx = np.linspace(0, coords.shape[0] - 1, max_points).astype(int)
+            coords = coords[idx]
+        for y, x in coords:
+            points.append((float(x), float(y)))
+
+    return points[:max_points]
+
+
 def sync_image_to_editors(input_image):
-    """将输入图像同步到三个关键帧画布作为背景。"""
+    """将输入图像同步到关键帧画布作为背景。"""
     if input_image is None:
-        return None, None, None
+        return None, None, None, None, None, None
     img = np.array(input_image)
-    return img, img, img
+    return img, img, img, img, img, img
 
 
 def generate_bbox_json_from_editors(editor_start, editor_mid, editor_end, num_frames):
@@ -566,6 +619,34 @@ def generate_bbox_json_from_editors(editor_start, editor_mid, editor_end, num_fr
         frames[str(nf - 1)] = bbox_end
 
     return json.dumps({"objects": [{"frames": frames}]}, indent=2)
+
+
+def generate_point_json_from_editors(editor_start, editor_mid, editor_end, num_frames):
+    points_start = extract_points_from_editor(editor_start, max_points=20)
+    points_mid = extract_points_from_editor(editor_mid, max_points=20)
+    points_end = extract_points_from_editor(editor_end, max_points=20)
+
+    if not points_start and not points_mid and not points_end:
+        return ""
+
+    nf = int(num_frames)
+    max_len = max(len(points_start), len(points_mid), len(points_end))
+    tracks = []
+    for idx in range(max_len):
+        frames = {}
+        if idx < len(points_start):
+            frames["0"] = points_start[idx]
+        if idx < len(points_mid):
+            frames[str(nf // 2)] = points_mid[idx]
+        if idx < len(points_end):
+            frames[str(nf - 1)] = points_end[idx]
+        if frames:
+            tracks.append({"frames": frames})
+
+    if not tracks:
+        return ""
+
+    return json.dumps({"points": tracks}, indent=2)
 
 
 def preview_motion_path(input_image, editor_start, editor_mid, editor_end, num_frames):
@@ -907,6 +988,32 @@ def build_point_tracks_from_json(json_str, num_frames, height, width):
     return tracks
 
 
+def build_point_masks_from_tracks(point_tracks, num_frames, height, width, radius=6):
+    if not point_tracks:
+        return None
+
+    masks = []
+    for track in point_tracks:
+        mask = torch.zeros(num_frames, 1, height, width, dtype=torch.bool)
+        for f in range(min(num_frames, len(track))):
+            x, y = track[f]
+            cx = int(round(x))
+            cy = int(round(y))
+            if cx < 0 or cy < 0 or cx >= width or cy >= height:
+                continue
+            x0 = max(0, cx - radius)
+            x1 = min(width - 1, cx + radius)
+            y0 = max(0, cy - radius)
+            y1 = min(height - 1, cy + radius)
+            for yy in range(y0, y1 + 1):
+                for xx in range(x0, x1 + 1):
+                    if (xx - cx) ** 2 + (yy - cy) ** 2 <= radius ** 2:
+                        mask[f, 0, yy, xx] = True
+        masks.append(mask)
+
+    return torch.stack(masks, dim=0)
+
+
 def build_motion_signals_preview(
     input_image,
     camera_json_text,
@@ -1058,7 +1165,7 @@ def generate_video(
     input_image, end_image,
     height, width, num_frames, num_inference_steps,
     cfg_scale, sigma_shift, seed, fps,
-    bbox_mask_file, track_video_file, bbox_json_text, camera_json_text,
+    bbox_mask_file, track_video_file, bbox_json_text, camera_json_text, point_json_text,
     progress=gr.Progress()
 ):
     if pipe_state["pipe"] is None:
@@ -1082,18 +1189,6 @@ def generate_video(
             raise gr.Error(f"Bbox JSON 解析失败: {e}")
 
     # 处理相机运动
-    camera_mask = None
-    if camera_json_text and camera_json_text.strip():
-        try:
-            camera_mask = build_camera_mask_from_json_str(
-                camera_json_text, int(num_frames), int(height), int(width)
-            )
-            if camera_mask is not None:
-                camera_mask = camera_mask.to(dtype=torch_dtype, device=device)
-        except Exception as e:
-            print(f"警告: 相机 JSON 解析失败: {e}")
-            camera_mask = None
-
     debug_lines = []
     track_video = None
     if track_video_file is not None:
@@ -1111,6 +1206,8 @@ def generate_video(
                 device,
                 bbox_mask,
                 bbox_json_text,
+                camera_json_text,
+                point_json_text,
                 input_image,
                 end_image,
                 num_frames,
@@ -1174,6 +1271,8 @@ def preview_track_video(
     fps,
     bbox_mask_file,
     bbox_json_text,
+    camera_json_text,
+    point_json_text,
 ):
     if pipe_state["pipe"] is None:
         raise gr.Error("请先加载模型！")
@@ -1198,6 +1297,8 @@ def preview_track_video(
         device,
         bbox_mask,
         bbox_json_text,
+        camera_json_text,
+        point_json_text,
         input_image,
         end_image,
         num_frames,
@@ -1247,7 +1348,7 @@ with gr.Blocks(
     )
 
     # ---- 模型配置 ----
-    with gr.Accordion("模型配置", open=True):
+    with gr.Accordion("模型配置", open=False):
         with gr.Row():
             with gr.Column(scale=1):
                 dit_path = gr.Textbox(
@@ -1441,6 +1542,67 @@ with gr.Blocks(
                             label="运动路径预览", interactive=False,
                         )
 
+                    # ---- 局部运动 Tab ----
+                    with gr.Tab("局部运动"):
+                        gr.Markdown(
+                            "在输入图像上用点拖拽标记局部运动轨迹，"
+                            "系统会提取点位置并生成点轨迹 JSON。"
+                        )
+
+                        with gr.Tabs():
+                            with gr.Tab("起始帧"):
+                                point_editor_start = gr.ImageEditor(
+                                    canvas_size=(832, 480),
+                                    sources=None,
+                                    layers=False,
+                                    interactive=True,
+                                    image_mode="RGBA",
+                                    brush=gr.Brush(
+                                        default_size=10,
+                                        default_color="#ffffff",
+                                        colors=["#ffffff"],
+                                    ),
+                                    eraser=gr.Eraser(default_size=10),
+                                    label="拖拽标记局部运动起始点",
+                                )
+
+                            with gr.Tab("中间帧"):
+                                point_editor_mid = gr.ImageEditor(
+                                    canvas_size=(832, 480),
+                                    sources=None,
+                                    layers=False,
+                                    interactive=True,
+                                    image_mode="RGBA",
+                                    brush=gr.Brush(
+                                        default_size=10,
+                                        default_color="#ffffff",
+                                        colors=["#ffffff"],
+                                    ),
+                                    eraser=gr.Eraser(default_size=10),
+                                    label="拖拽标记局部运动中间点",
+                                )
+
+                            with gr.Tab("结束帧"):
+                                point_editor_end = gr.ImageEditor(
+                                    canvas_size=(832, 480),
+                                    sources=None,
+                                    layers=False,
+                                    interactive=True,
+                                    image_mode="RGBA",
+                                    brush=gr.Brush(
+                                        default_size=10,
+                                        default_color="#ffffff",
+                                        colors=["#ffffff"],
+                                    ),
+                                    eraser=gr.Eraser(default_size=10),
+                                    label="拖拽标记局部运动结束点",
+                                )
+
+                        with gr.Row():
+                            point_extract_btn = gr.Button(
+                                "提取点 → 生成 JSON", variant="secondary",
+                            )
+
                     # ---- 相机运动 Tab ----
                     with gr.Tab("相机运动"):
                         gr.Markdown(
@@ -1566,13 +1728,13 @@ with gr.Blocks(
     input_image.change(
         fn=sync_image_to_editors,
         inputs=[input_image],
-        outputs=[editor_start, editor_mid, editor_end],
+        outputs=[editor_start, editor_mid, editor_end, point_editor_start, point_editor_mid, point_editor_end],
     )
 
     sync_btn.click(
         fn=sync_image_to_editors,
         inputs=[input_image],
-        outputs=[editor_start, editor_mid, editor_end],
+        outputs=[editor_start, editor_mid, editor_end, point_editor_start, point_editor_mid, point_editor_end],
     )
 
     extract_btn.click(
@@ -1583,6 +1745,11 @@ with gr.Blocks(
         fn=preview_motion_path,
         inputs=[input_image, editor_start, editor_mid, editor_end, num_frames],
         outputs=[motion_preview],
+    )
+    point_extract_btn.click(
+        fn=generate_point_json_from_editors,
+        inputs=[point_editor_start, point_editor_mid, point_editor_end, num_frames],
+        outputs=[point_json_text],
     )
 
     preview_btn.click(
@@ -1632,7 +1799,7 @@ with gr.Blocks(
             input_image, end_image,
             height, width, num_frames, num_inference_steps,
             cfg_scale, sigma_shift, seed, fps,
-            bbox_mask_file, track_video_file, bbox_json_text, camera_json_text,
+            bbox_mask_file, track_video_file, bbox_json_text, camera_json_text, point_json_text,
         ],
         outputs=[output_video, track_preview],
     )
@@ -1642,7 +1809,7 @@ with gr.Blocks(
         inputs=[
             input_image, end_image,
             height, width, num_frames, fps,
-            bbox_mask_file, bbox_json_text,
+            bbox_mask_file, bbox_json_text, camera_json_text, point_json_text,
         ],
         outputs=track_preview,
     )
