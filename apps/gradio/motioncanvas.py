@@ -241,6 +241,33 @@ def build_video_rgb_from_images(input_image, end_image, num_frames, height, widt
     return torch.stack(frames, dim=0)
 
 
+def build_track_video_preview(track_video, fps=15):
+    if track_video is None:
+        return None
+
+    track_video = track_video.detach().to("cpu", dtype=torch.float32)
+    if track_video.ndim == 5:
+        track_video = track_video[0]
+    track_video = track_video.abs().sum(dim=0)  # [T, H, W]
+
+    frames = []
+    for t in range(track_video.shape[0]):
+        frame = track_video[t]
+        frame = frame - frame.min()
+        denom = frame.max() - frame.min()
+        if denom > 0:
+            frame = frame / denom
+        frame = (frame * 255.0).clamp(0, 255).to(torch.uint8).numpy()
+        frames.append(Image.fromarray(frame, mode="L").convert("RGB"))
+
+    if not frames:
+        return None
+
+    preview_path = os.path.join(tempfile.gettempdir(), "track_video_preview.mp4")
+    save_video(frames, preview_path, fps=int(fps), quality=5)
+    return preview_path
+
+
 def load_cotracker(device, dtype):
     if pipe_state.get("cotracker") is not None:
         return pipe_state["cotracker"]
@@ -676,13 +703,14 @@ def generate_video(
 
     output_path = os.path.join(tempfile.gettempdir(), "motioncanvas_output.mp4")
     save_video(video_frames[0], output_path, fps=int(fps), quality=5)
+    track_preview_path = build_track_video_preview(track_video, fps=fps)
     if not debug_lines:
         debug_lines.append("track_video not provided and not generated")
 
     for line in debug_lines:
         print(line)
 
-    return output_path
+    return output_path, track_preview_path
 
 
 # ==================== UI ====================
@@ -988,6 +1016,7 @@ with gr.Blocks(
                 elem_classes="generate-btn",
             )
             output_video = gr.Video(label="生成结果", interactive=False)
+            track_preview = gr.Video(label="Track Video 预览", interactive=False)
 
     # ---- 事件绑定 ----
 
@@ -1062,7 +1091,7 @@ with gr.Blocks(
             cfg_scale, sigma_shift, seed, fps,
             bbox_mask_file, track_video_file, bbox_json_text, camera_json_text,
         ],
-        outputs=output_video,
+        outputs=[output_video, track_preview],
     )
 
 
