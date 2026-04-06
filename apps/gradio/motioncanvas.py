@@ -115,9 +115,10 @@ def load_checkpoint_weights(pipe, checkpoint_path, device="cpu"):
 
 
 def load_models(dit_path, vae_path, text_encoder_path, image_encoder_path,
-                checkpoint_path, dtype_str):
+                                motion_controller_path, vace_dir, checkpoint_path, dtype_str):
     config_key = (f"{dit_path}|{vae_path}|{text_encoder_path}|"
-                  f"{image_encoder_path}|{checkpoint_path}|{dtype_str}")
+                                    f"{image_encoder_path}|{motion_controller_path}|{vace_dir}|"
+                                    f"{checkpoint_path}|{dtype_str}")
     if pipe_state["loaded_config"] == config_key and pipe_state["pipe"] is not None:
         return "✅ 模型已加载（缓存命中）"
 
@@ -128,10 +129,26 @@ def load_models(dit_path, vae_path, text_encoder_path, image_encoder_path,
                     (text_encoder_path, "Text Encoder")]:
         if not p or not os.path.exists(p):
             return f"❌ {name} 路径无效: {p}"
+    if motion_controller_path and not os.path.exists(motion_controller_path):
+        return f"❌ Motion Controller 路径无效: {motion_controller_path}"
 
     model_paths = [text_encoder_path, vae_path, dit_path]
     if image_encoder_path and os.path.exists(image_encoder_path):
         model_paths.append(image_encoder_path)
+    if motion_controller_path:
+        model_paths.append(motion_controller_path)
+    if vace_dir and os.path.isdir(vace_dir):
+        vace_files = [
+            os.path.join(vace_dir, "diffusion_pytorch_model.safetensors"),
+            os.path.join(vace_dir, "models_t5_umt5-xxl-enc-bf16.pth"),
+            os.path.join(vace_dir, "Wan2.1_VAE.pth"),
+        ]
+        for file_path in vace_files:
+            if not os.path.exists(file_path):
+                return f"❌ VACE 文件缺失: {file_path}"
+        model_paths.extend(vace_files)
+    elif vace_dir:
+        return f"❌ VACE 目录无效: {vace_dir}"
 
     model_manager = ModelManager(torch_dtype=torch_dtype, device="cpu")
     model_manager.load_models(model_paths)
@@ -519,10 +536,6 @@ def generate_video(
         "progress_bar_cmd": progress.tqdm,
     }
 
-    # 如果管道支持相机运动，则传递相机 mask
-    if camera_mask is not None and hasattr(pipe, 'camera_zeroconv'):
-        pipeline_kwargs["camera_mask"] = camera_mask
-
     video_frames = pipe(**pipeline_kwargs)
 
     if not video_frames or len(video_frames) == 0:
@@ -576,6 +589,16 @@ with gr.Blocks(
                     value="/root/autodl-tmp/models/wan_1.3b/"
                           "models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth",
                 )
+                motion_controller_path = gr.Textbox(
+                    label="Motion Controller 路径（可选）",
+                    value="/root/autodl-tmp/models/DiffSynth-Studio/"
+                          "Wan2.1-1.3b-speedcontrol-v1/model.safetensors",
+                )
+                vace_dir = gr.Textbox(
+                    label="VACE 目录（可选）",
+                    value="/root/autodl-tmp/models/iic/"
+                          "VACE-Wan2.1-1.3B-Preview",
+                )
                 checkpoint_path = gr.Textbox(
                     label="MotionCanvas Checkpoint 路径",
                     value="/root/autodl-tmp/models/motioncanvas/model.pt",
@@ -593,7 +616,8 @@ with gr.Blocks(
         load_btn.click(
             fn=load_models,
             inputs=[dit_path, vae_path, text_encoder_path,
-                    image_encoder_path, checkpoint_path, dtype_choice],
+                    image_encoder_path, motion_controller_path, vace_dir,
+                    checkpoint_path, dtype_choice],
             outputs=model_status,
         )
 

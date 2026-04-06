@@ -121,6 +121,8 @@ def main():
     parser.add_argument("--vae_path", type=str, required=True, help="VAE 模型路径")
     parser.add_argument("--text_encoder_path", type=str, required=True, help="文本编码器路径")
     parser.add_argument("--image_encoder_path", type=str, default=None, help="图像编码器路径 (I2V 需要)")
+    parser.add_argument("--motion_controller_path", type=str, default=None, help="Motion Controller 模型路径")
+    parser.add_argument("--vace_dir", type=str, default=None, help="VACE 模型目录")
     parser.add_argument("--checkpoint_path", type=str, default=None, help="MotionCanvas checkpoint 路径")
 
     # ---- 输入 ----
@@ -169,6 +171,21 @@ def main():
     model_paths = [args.text_encoder_path, args.vae_path, args.dit_path]
     if args.image_encoder_path:
         model_paths.append(args.image_encoder_path)
+    if args.motion_controller_path and os.path.exists(args.motion_controller_path):
+        model_paths.append(args.motion_controller_path)
+    elif args.motion_controller_path:
+        raise FileNotFoundError(f"Motion Controller file not found: {args.motion_controller_path}")
+    if args.vace_dir and os.path.isdir(args.vace_dir):
+        vace_files = [
+            os.path.join(args.vace_dir, "diffusion_pytorch_model.safetensors"),
+            os.path.join(args.vace_dir, "models_t5_umt5-xxl-enc-bf16.pth"),
+            os.path.join(args.vace_dir, "Wan2.1_VAE.pth"),
+        ]
+        for file_path in vace_files:
+            if os.path.exists(file_path):
+                model_paths.append(file_path)
+            else:
+                raise FileNotFoundError(f"VACE file not found: {file_path}")
 
     model_manager = ModelManager(torch_dtype=torch_dtype, device="cpu")
     model_manager.load_models(model_paths)
