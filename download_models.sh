@@ -16,7 +16,8 @@
 set -e
 
 SOURCE="modelscope"
-MODEL_DIR="models"
+MODEL_DIR="/root/autodl-tmp/models"
+COTRACKER_HUB_DIR="/root/autodl-tmp/torch_hub"
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -44,6 +45,7 @@ echo "============================================"
 echo " MotionCanvas 模型下载"
 echo " 下载源: ${SOURCE}"
 echo " 保存目录: ${MODEL_DIR}"
+echo " CoTracker 缓存目录: ${COTRACKER_HUB_DIR}"
 echo "============================================"
 
 # -----------------------------------------------
@@ -125,6 +127,25 @@ fi
 echo "[4/4] MotionCanvas 权重下载完成！"
 
 # -----------------------------------------------
+# 5. 预下载 CoTracker 到本地缓存
+# -----------------------------------------------
+echo ""
+echo "[5/5] 预下载 CoTracker (torch.hub) ..."
+mkdir -p "${COTRACKER_HUB_DIR}"
+python - <<'PY'
+import os
+import torch
+
+hub_dir = os.environ.get("COTRACKER_HUB_DIR", "/root/autodl-tmp/torch_hub")
+os.makedirs(hub_dir, exist_ok=True)
+torch.hub.set_dir(hub_dir)
+torch.hub.load("facebookresearch/co-tracker", "cotracker3_offline", trust_repo=True)
+print(f"CoTracker cached at {hub_dir}")
+PY
+
+echo "[5/5] CoTracker 预下载完成！"
+
+# -----------------------------------------------
 # 验证文件完整性
 # -----------------------------------------------
 echo ""
@@ -163,6 +184,15 @@ check_file "${MODEL_DIR}/iic/VACE-Wan2.1-1.3B-Preview/Wan2.1_VAE.pth"
 echo ""
 echo "MotionCanvas:"
 check_file "${MODEL_DIR}/motioncanvas/model.pt"
+
+echo ""
+echo "CoTracker (torch.hub):"
+if [ -d "${COTRACKER_HUB_DIR}/facebookresearch_co-tracker_main" ] || [ -d "${COTRACKER_HUB_DIR}/hub/facebookresearch_co-tracker_main" ]; then
+    echo "  ✓ ${COTRACKER_HUB_DIR}/facebookresearch_co-tracker_main"
+else
+    echo "  ✗ ${COTRACKER_HUB_DIR}/facebookresearch_co-tracker_main [缺失]"
+    MISSING=$((MISSING + 1))
+fi
 
 echo ""
 if [ $MISSING -eq 0 ]; then
