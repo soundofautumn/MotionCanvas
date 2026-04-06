@@ -225,6 +225,77 @@ def build_object_masks_from_bbox_json(json_str, num_frames, height, width):
     return torch.stack(obj_masks, dim=0)
 
 
+def build_object_masks_from_bbox_json_interpolated(json_str, num_frames, height, width):
+    bbox_data = json.loads(json_str)
+    objects = bbox_data.get("objects", [])
+    if not objects:
+        return None
+
+    obj_masks = []
+    for obj in objects:
+        frames = obj.get("frames", {})
+        if not frames:
+            continue
+
+        keyframes = []
+        for fi_str, bbox in frames.items():
+            fi = int(fi_str)
+            if fi >= num_frames:
+                continue
+            x1, y1, x2, y2 = bbox
+            if all(0 <= v <= 1.0 for v in [x1, y1, x2, y2]):
+                x1, x2 = x1 * width, x2 * width
+                y1, y2 = y1 * height, y2 * height
+            keyframes.append((fi, float(x1), float(y1), float(x2), float(y2)))
+
+        if not keyframes:
+            continue
+
+        keyframes = sorted(keyframes, key=lambda x: x[0])
+        obj_mask = torch.zeros(num_frames, 1, height, width, dtype=torch.bool)
+
+        for idx in range(len(keyframes) - 1):
+            f0, x10, y10, x20, y20 = keyframes[idx]
+            f1, x11, y11, x21, y21 = keyframes[idx + 1]
+            span = max(1, f1 - f0)
+            for f in range(f0, f1 + 1):
+                t = (f - f0) / span
+                x1 = x10 + (x11 - x10) * t
+                y1 = y10 + (y11 - y10) * t
+                x2 = x20 + (x21 - x20) * t
+                y2 = y20 + (y21 - y20) * t
+                x1 = int(max(0, min(width, round(x1))))
+                x2 = int(max(0, min(width, round(x2))))
+                y1 = int(max(0, min(height, round(y1))))
+                y2 = int(max(0, min(height, round(y2))))
+                if x2 > x1 and y2 > y1:
+                    obj_mask[f, 0, y1:y2, x1:x2] = True
+
+        f0, x10, y10, x20, y20 = keyframes[0]
+        for f in range(0, f0):
+            x1 = int(max(0, min(width, round(x10))))
+            x2 = int(max(0, min(width, round(x20))))
+            y1 = int(max(0, min(height, round(y10))))
+            y2 = int(max(0, min(height, round(y20))))
+            if x2 > x1 and y2 > y1:
+                obj_mask[f, 0, y1:y2, x1:x2] = True
+
+        f1, x11, y11, x21, y21 = keyframes[-1]
+        for f in range(f1, num_frames):
+            x1 = int(max(0, min(width, round(x11))))
+            x2 = int(max(0, min(width, round(x21))))
+            y1 = int(max(0, min(height, round(y11))))
+            y2 = int(max(0, min(height, round(y21))))
+            if x2 > x1 and y2 > y1:
+                obj_mask[f, 0, y1:y2, x1:x2] = True
+
+        obj_masks.append(obj_mask)
+
+    if not obj_masks:
+        return None
+    return torch.stack(obj_masks, dim=0)
+
+
 def build_video_rgb_from_images(input_image, end_image, num_frames, height, width):
     if input_image is None:
         return None
@@ -239,6 +310,73 @@ def build_video_rgb_from_images(input_image, end_image, num_frames, height, widt
     if end_image is not None:
         frames[-1] = to_frame(end_image)
     return torch.stack(frames, dim=0)
+
+
+def build_video_rgb_from_bbox_motion(input_image, bbox_json_text, num_frames, height, width):
+    if input_image is None:
+        return None
+
+    if not bbox_json_text or not bbox_json_text.strip():
+        return None
+
+    bbox_data = json.loads(bbox_json_text)
+    objects = bbox_data.get("objects", [])
+    if not objects:
+        return None
+
+    frames = objects[0].get("frames", {})
+    if not frames:
+        return None
+
+    keyframes = []
+    for fi_str, bbox in frames.items():
+        fi = int(fi_str)
+        if fi >= num_frames:
+            continue
+        x1, y1, x2, y2 = bbox
+        if all(0 <= v <= 1.0 for v in [x1, y1, x2, y2]):
+            x1, x2 = x1 * width, x2 * width
+            y1, y2 = y1 * height, y2 * height
+        keyframes.append((fi, float(x1), float(y1), float(x2), float(y2)))
+
+    if not keyframes:
+        return None
+
+    keyframes = sorted(keyframes, key=lambda x: x[0])
+    base = input_image.resize((width, height)).convert("RGB")
+
+    def interp_bbox(f):
+        if f <= keyframes[0][0]:
+            return keyframes[0][1:]
+        if f >= keyframes[-1][0]:
+            return keyframes[-1][1:]
+        for idx in range(len(keyframes) - 1):
+            f0, x10, y10, x20, y20 = keyframes[idx]
+            f1, x11, y11, x21, y21 = keyframes[idx + 1]
+            if f0 <= f <= f1:
+                span = max(1, f1 - f0)
+                t = (f - f0) / span
+                x1 = x10 + (x11 - x10) * t
+                y1 = y10 + (y11 - y10) * t
+                x2 = x20 + (x21 - x20) * t
+                y2 = y20 + (y21 - y20) * t
+                return x1, y1, x2, y2
+        return keyframes[-1][1:]
+
+    frames_out = []
+    base_cx = width / 2.0
+    base_cy = height / 2.0
+    for f in range(num_frames):
+        x1, y1, x2, y2 = interp_bbox(f)
+        cx = (x1 + x2) / 2.0
+        cy = (y1 + y2) / 2.0
+        dx = base_cx - cx
+        dy = base_cy - cy
+        shifted = Image.new("RGB", (width, height), (0, 0, 0))
+        shifted.paste(base, (int(round(dx)), int(round(dy))))
+        frames_out.append(torch.from_numpy(np.array(shifted)).permute(2, 0, 1))
+
+    return torch.stack(frames_out, dim=0)
 
 
 def build_track_video_preview(track_video, input_image=None, fps=15):
@@ -296,7 +434,7 @@ def compute_track_video(
 
     object_masks = None
     if bbox_json_text and bbox_json_text.strip():
-        object_masks = build_object_masks_from_bbox_json(
+        object_masks = build_object_masks_from_bbox_json_interpolated(
             bbox_json_text, int(num_frames), int(height), int(width)
         )
 
@@ -308,9 +446,13 @@ def compute_track_video(
         object_masks = merged.unsqueeze(0).to(dtype=torch.bool)
 
     reference_imgs_indicator = [object_masks.shape[0]]
-    video_rgb = build_video_rgb_from_images(
-        input_image, end_image, int(num_frames), int(height), int(width)
+    video_rgb = build_video_rgb_from_bbox_motion(
+        input_image, bbox_json_text, int(num_frames), int(height), int(width)
     )
+    if video_rgb is None:
+        video_rgb = build_video_rgb_from_images(
+            input_image, end_image, int(num_frames), int(height), int(width)
+        )
     if video_rgb is None:
         return None
 
