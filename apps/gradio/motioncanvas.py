@@ -685,12 +685,6 @@ def generate_video(
 
 with gr.Blocks(
     title="MotionCanvas",
-    theme=gr.themes.Soft(
-        primary_hue="violet",
-        secondary_hue="indigo",
-        neutral_hue="slate",
-    ),
-    css=CUSTOM_CSS,
 ) as app:
 
     gr.HTML(
@@ -991,7 +985,7 @@ with gr.Blocks(
             )
             output_video = gr.Video(label="生成结果", interactive=False)
             debug_info = gr.Textbox(
-                label="调试信息", lines=6, interactive=False, show_copy_button=True
+                label="调试信息", lines=6, interactive=False
             )
 
     # ---- 事件绑定 ----
@@ -1072,4 +1066,14 @@ with gr.Blocks(
 
 
 if __name__ == "__main__":
-    app.launch(server_name="0.0.0.0", server_port=6006, share=False)
+    app.launch(
+        server_name="0.0.0.0",
+        server_port=6006,
+        share=False,
+        theme=gr.themes.Soft(
+            primary_hue="violet",
+            secondary_hue="indigo",
+            neutral_hue="slate",
+        ),
+        css=CUSTOM_CSS,
+    )
