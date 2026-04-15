@@ -1637,197 +1637,89 @@ with gr.Blocks(
                     # ---- 可视化选区 Tab ----
                     with gr.Tab("可视化选区"):
                         gr.Markdown(
-                            "上传输入图像后，在下方关键帧画布上**涂抹标记物体区域**，"
-                            "系统会提取涂抹边界作为 Bbox。分别标记起始、中间、结束帧"
-                            "中物体的位置，即可定义运动轨迹。"
+                            "上传输入图像后，在下方画布上**涂抹标记物体区域**，"
+                            "并用帧滑条选择当前要编辑的帧。点击“保存当前帧选区”即可将该帧写入关键帧。"
                         )
                         sync_btn = gr.Button(
                             "同步输入图像到画布", size="sm", variant="secondary",
                         )
 
-                        with gr.Tabs():
-                            with gr.Tab("起始帧"):
-                                gr.HTML(
-                                    '<div class="kf-label kf-start">'
-                                    '起始帧 (Frame 0) — 绿色笔刷</div>'
-                                )
-                                editor_start = gr.ImageEditor(
-                                    canvas_size=(832, 480),
-                                    sources=None,
-                                    layers=False,
-                                    interactive=True,
-                                    image_mode="RGBA",
-                                    brush=gr.Brush(
-                                        default_size=40,
-                                        default_color="#2ecc71",
-                                        colors=["#2ecc71"],
-                                    ),
-                                    eraser=gr.Eraser(default_size=40),
-                                    label="在此涂抹标记物体起始位置",
-                                )
-
-                            with gr.Tab("中间帧"):
-                                gr.HTML(
-                                    '<div class="kf-label kf-mid">'
-                                    '中间帧 — 黄色笔刷</div>'
-                                )
-                                editor_mid = gr.ImageEditor(
-                                    canvas_size=(832, 480),
-                                    sources=None,
-                                    layers=False,
-                                    interactive=True,
-                                    image_mode="RGBA",
-                                    brush=gr.Brush(
-                                        default_size=40,
-                                        default_color="#f1c40f",
-                                        colors=["#f1c40f"],
-                                    ),
-                                    eraser=gr.Eraser(default_size=40),
-                                    label="在此涂抹标记物体中间位置",
-                                )
-
-                            with gr.Tab("结束帧"):
-                                gr.HTML(
-                                    '<div class="kf-label kf-end">'
-                                    '结束帧 — 红色笔刷</div>'
-                                )
-                                editor_end = gr.ImageEditor(
-                                    canvas_size=(832, 480),
-                                    sources=None,
-                                    layers=False,
-                                    interactive=True,
-                                    image_mode="RGBA",
-                                    brush=gr.Brush(
-                                        default_size=40,
-                                        default_color="#e74c3c",
-                                        colors=["#e74c3c"],
-                                    ),
-                                    eraser=gr.Eraser(default_size=40),
-                                    label="在此涂抹标记物体结束位置",
-                                )
-
+                        bbox_kf_state = gr.State({})
                         with gr.Row():
-                            extract_btn = gr.Button(
-                                "提取选区 → 生成 JSON", variant="secondary",
+                            bbox_frame_idx = gr.Slider(
+                                minimum=0, maximum=48, value=0, step=1, label="当前编辑帧 (Bbox)", interactive=True
                             )
+                        bbox_editor = gr.ImageEditor(
+                            canvas_size=(832, 480),
+                            sources=None,
+                            layers=False,
+                            interactive=True,
+                            image_mode="RGBA",
+                            brush=gr.Brush(
+                                default_size=40,
+                                default_color="#2ecc71",
+                                colors=["#2ecc71"],
+                            ),
+                            eraser=gr.Eraser(default_size=40),
+                            label="在此涂抹标记物体区域（保存为该帧关键帧）",
+                        )
+                        with gr.Row():
+                            bbox_save_btn = gr.Button("保存当前帧选区", variant="secondary")
+                            bbox_delete_btn = gr.Button("删除当前帧选区", variant="secondary")
 
                     # ---- 局部运动 Tab ----
                     with gr.Tab("局部运动"):
                         gr.Markdown(
-                            "在输入图像上用点拖拽标记局部运动轨迹，"
-                            "系统会提取点位置并生成点轨迹 JSON。"
+                            "用帧滑条选择当前要编辑的帧，然后在画布上点涂/拖拽标记局部点。"
+                            "点击“保存当前帧点”会把该帧写入关键帧，并自动生成点轨迹 JSON。"
                         )
 
-                        with gr.Tabs():
-                            with gr.Tab("起始帧"):
-                                point_editor_start = gr.ImageEditor(
-                                    canvas_size=(832, 480),
-                                    sources=None,
-                                    layers=False,
-                                    interactive=True,
-                                    image_mode="RGBA",
-                                    brush=gr.Brush(
-                                        default_size=10,
-                                        default_color="#ffffff",
-                                        colors=["#ffffff"],
-                                    ),
-                                    eraser=gr.Eraser(default_size=10),
-                                    label="拖拽标记局部运动起始点",
-                                )
-
-                            with gr.Tab("中间帧"):
-                                point_editor_mid = gr.ImageEditor(
-                                    canvas_size=(832, 480),
-                                    sources=None,
-                                    layers=False,
-                                    interactive=True,
-                                    image_mode="RGBA",
-                                    brush=gr.Brush(
-                                        default_size=10,
-                                        default_color="#ffffff",
-                                        colors=["#ffffff"],
-                                    ),
-                                    eraser=gr.Eraser(default_size=10),
-                                    label="拖拽标记局部运动中间点",
-                                )
-
-                            with gr.Tab("结束帧"):
-                                point_editor_end = gr.ImageEditor(
-                                    canvas_size=(832, 480),
-                                    sources=None,
-                                    layers=False,
-                                    interactive=True,
-                                    image_mode="RGBA",
-                                    brush=gr.Brush(
-                                        default_size=10,
-                                        default_color="#ffffff",
-                                        colors=["#ffffff"],
-                                    ),
-                                    eraser=gr.Eraser(default_size=10),
-                                    label="拖拽标记局部运动结束点",
-                                )
-
+                        point_kf_state = gr.State({})
                         with gr.Row():
-                            point_extract_btn = gr.Button(
-                                "提取点 → 生成 JSON", variant="secondary",
+                            point_frame_idx = gr.Slider(
+                                minimum=0, maximum=48, value=0, step=1, label="当前编辑帧 (Points)", interactive=True
                             )
+                        point_editor = gr.ImageEditor(
+                            canvas_size=(832, 480),
+                            sources=None,
+                            layers=False,
+                            interactive=True,
+                            image_mode="RGBA",
+                            brush=gr.Brush(
+                                default_size=10,
+                                default_color="#ffffff",
+                                colors=["#ffffff"],
+                            ),
+                            eraser=gr.Eraser(default_size=10),
+                            label="在此标记局部点（保存为该帧关键帧）",
+                        )
+                        with gr.Row():
+                            point_save_btn = gr.Button("保存当前帧点", variant="secondary")
+                            point_delete_btn = gr.Button("删除当前帧点", variant="secondary")
 
                     # ---- 相机运动 Tab ----
                     with gr.Tab("相机运动"):
                         gr.Markdown(
-                            "通过调整三个关键帧的相机参数来定义相机轨迹。\n"
-                            "包括缩放（Zoom）、平移（Pan）和旋转（Rotation）。"
+                            "用帧滑条选择当前要编辑的帧，然后调整相机参数并保存为关键帧。\n"
+                            "模型会自动对关键帧之间进行插值。"
                         )
 
-                        gr.Markdown("#### 起始帧相机参数", elem_classes="section-title")
+                        camera_kf_state = gr.State({})
                         with gr.Row():
-                            camera_zoom_start = gr.Slider(
-                                0.5, 2.0, value=1.0, step=0.1, label="缩放 (Zoom)",
-                            )
-                            camera_pan_x_start = gr.Slider(
-                                -100, 100, value=0, step=5, label="平移 X (Pan X)",
-                            )
-                            camera_pan_y_start = gr.Slider(
-                                -100, 100, value=0, step=5, label="平移 Y (Pan Y)",
-                            )
-                            camera_rotation_start = gr.Slider(
-                                -45, 45, value=0, step=5, label="旋转 (°)",
+                            camera_frame_idx = gr.Slider(
+                                minimum=0, maximum=48, value=0, step=1, label="当前编辑帧 (Camera)", interactive=True
                             )
 
-                        gr.Markdown("#### 中间帧相机参数", elem_classes="section-title")
+                        gr.Markdown("#### 当前帧相机参数", elem_classes="section-title")
                         with gr.Row():
-                            camera_zoom_mid = gr.Slider(
-                                0.5, 2.0, value=1.0, step=0.1, label="缩放 (Zoom)",
-                            )
-                            camera_pan_x_mid = gr.Slider(
-                                -100, 100, value=0, step=5, label="平移 X (Pan X)",
-                            )
-                            camera_pan_y_mid = gr.Slider(
-                                -100, 100, value=0, step=5, label="平移 Y (Pan Y)",
-                            )
-                            camera_rotation_mid = gr.Slider(
-                                -45, 45, value=0, step=5, label="旋转 (°)",
-                            )
-
-                        gr.Markdown("#### 结束帧相机参数", elem_classes="section-title")
-                        with gr.Row():
-                            camera_zoom_end = gr.Slider(
-                                0.5, 2.0, value=1.0, step=0.1, label="缩放 (Zoom)",
-                            )
-                            camera_pan_x_end = gr.Slider(
-                                -100, 100, value=0, step=5, label="平移 X (Pan X)",
-                            )
-                            camera_pan_y_end = gr.Slider(
-                                -100, 100, value=0, step=5, label="平移 Y (Pan Y)",
-                            )
-                            camera_rotation_end = gr.Slider(
-                                -45, 45, value=0, step=5, label="旋转 (°)",
-                            )
+                            camera_zoom = gr.Slider(0.5, 2.0, value=1.0, step=0.1, label="缩放 (Zoom)")
+                            camera_pan_x = gr.Slider(-100, 100, value=0, step=5, label="平移 X (Pan X)")
+                            camera_pan_y = gr.Slider(-100, 100, value=0, step=5, label="平移 Y (Pan Y)")
+                            camera_rotation = gr.Slider(-45, 45, value=0, step=5, label="旋转 (°)")
 
                         with gr.Row():
-                            camera_extract_btn = gr.Button(
-                                "生成相机 JSON", variant="secondary",
-                            )
+                            camera_save_btn = gr.Button("保存当前帧相机", variant="secondary")
+                            camera_delete_btn = gr.Button("删除当前帧相机", variant="secondary")
 
                     # ---- JSON / 高级 Tab ----
                     with gr.Tab("JSON / 高级选项"):
@@ -1903,36 +1795,65 @@ with gr.Blocks(
     input_image.change(
         fn=sync_image_to_editors,
         inputs=[input_image],
-        outputs=[editor_start, editor_mid, editor_end, point_editor_start, point_editor_mid, point_editor_end],
+        outputs=[bbox_editor, point_editor],
     )
 
     sync_btn.click(
         fn=sync_image_to_editors,
         inputs=[input_image],
-        outputs=[editor_start, editor_mid, editor_end, point_editor_start, point_editor_mid, point_editor_end],
+        outputs=[bbox_editor, point_editor],
     )
 
-    extract_btn.click(
-        fn=generate_bbox_json_from_editors,
-        inputs=[editor_start, editor_mid, editor_end, num_frames],
-        outputs=[bbox_json_text],
-    )
-    point_extract_btn.click(
-        fn=generate_point_json_from_editors,
-        inputs=[point_editor_start, point_editor_mid, point_editor_end, num_frames],
-        outputs=[point_json_text],
+    # ---- 帧滑条范围随 num_frames 更新 ----
+    num_frames.change(
+        fn=_frame_slider_updates,
+        inputs=[num_frames],
+        outputs=[bbox_frame_idx, point_frame_idx, camera_frame_idx],
     )
 
-    # ---- 相机运动事件绑定 ----
-    camera_extract_btn.click(
-        fn=generate_camera_json_from_sliders,
-        inputs=[
-            camera_zoom_start, camera_pan_x_start, camera_pan_y_start, camera_rotation_start,
-            camera_zoom_mid, camera_pan_x_mid, camera_pan_y_mid, camera_rotation_mid,
-            camera_zoom_end, camera_pan_x_end, camera_pan_y_end, camera_rotation_end,
-            num_frames,
-        ],
-        outputs=[camera_json_text],
+    # ---- 切换帧时，重置画布为输入图像（避免跨帧残留笔迹） ----
+    bbox_frame_idx.change(fn=_reset_editor_canvas, inputs=[input_image], outputs=[bbox_editor])
+    point_frame_idx.change(fn=_reset_editor_canvas, inputs=[input_image], outputs=[point_editor])
+
+    # ---- Bbox 关键帧保存/删除 ----
+    bbox_save_btn.click(
+        fn=save_bbox_keyframe,
+        inputs=[bbox_editor, bbox_frame_idx, bbox_kf_state],
+        outputs=[bbox_kf_state, bbox_json_text],
+    )
+    bbox_delete_btn.click(
+        fn=delete_bbox_keyframe,
+        inputs=[bbox_frame_idx, bbox_kf_state],
+        outputs=[bbox_kf_state, bbox_json_text],
+    )
+
+    # ---- Point 关键帧保存/删除 ----
+    point_save_btn.click(
+        fn=save_point_keyframe,
+        inputs=[point_editor, point_frame_idx, point_kf_state],
+        outputs=[point_kf_state, point_json_text],
+    )
+    point_delete_btn.click(
+        fn=delete_point_keyframe,
+        inputs=[point_frame_idx, point_kf_state],
+        outputs=[point_kf_state, point_json_text],
+    )
+
+    # ---- Camera 关键帧加载/保存/删除 ----
+    camera_frame_idx.change(
+        fn=load_camera_keyframe,
+        inputs=[camera_frame_idx, camera_kf_state],
+        outputs=[camera_zoom, camera_pan_x, camera_pan_y, camera_rotation],
+    )
+    camera_save_btn.click(
+        fn=save_camera_keyframe,
+        inputs=[camera_frame_idx, camera_zoom, camera_pan_x, camera_pan_y, camera_rotation, camera_kf_state],
+        outputs=[camera_kf_state, camera_json_text],
+    )
+    camera_delete_btn.click(
+        fn=delete_camera_keyframe,
+        inputs=[camera_frame_idx, camera_kf_state],
+        outputs=[camera_kf_state, camera_json_text],
     )
 
     gen_params_btn.click(
