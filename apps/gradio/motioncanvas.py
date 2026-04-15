@@ -704,7 +704,7 @@ def _frame_slider_updates(num_frames):
     nf = int(num_frames)
     max_v = max(0, nf - 1)
     upd = gr.update(minimum=0, maximum=max_v, value=0)
-    return upd, upd, upd
+    return upd
 
 
 def _bbox_state_to_json(bbox_state):
@@ -1645,12 +1645,18 @@ with gr.Blocks(
                             "同步输入图像到画布", size="sm", variant="secondary",
                         )
 
+                        with gr.Row():
+                            motion_frame_idx = gr.Slider(
+                                minimum=0,
+                                maximum=48,
+                                value=0,
+                                step=1,
+                                label="当前编辑帧 (全局)",
+                                interactive=True,
+                            )
+
                         gr.Markdown("### 物体运动（Bbox）", elem_classes="section-title")
                         bbox_kf_state = gr.State({})
-                        with gr.Row():
-                            bbox_frame_idx = gr.Slider(
-                                minimum=0, maximum=48, value=0, step=1, label="当前编辑帧 (Bbox)", interactive=True
-                            )
                         bbox_editor = gr.ImageEditor(
                             canvas_size=(832, 480),
                             sources=None,
@@ -1671,10 +1677,6 @@ with gr.Blocks(
 
                         gr.Markdown("### 局部运动（点轨迹）", elem_classes="section-title")
                         point_kf_state = gr.State({})
-                        with gr.Row():
-                            point_frame_idx = gr.Slider(
-                                minimum=0, maximum=48, value=0, step=1, label="当前编辑帧 (Points)", interactive=True
-                            )
                         point_editor = gr.ImageEditor(
                             canvas_size=(832, 480),
                             sources=None,
@@ -1695,11 +1697,6 @@ with gr.Blocks(
 
                         gr.Markdown("### 相机运动", elem_classes="section-title")
                         camera_kf_state = gr.State({})
-                        with gr.Row():
-                            camera_frame_idx = gr.Slider(
-                                minimum=0, maximum=48, value=0, step=1, label="当前编辑帧 (Camera)", interactive=True
-                            )
-
                         gr.Markdown("#### 当前帧相机参数", elem_classes="section-title")
                         with gr.Row():
                             camera_zoom = gr.Slider(0.5, 2.0, value=1.0, step=0.1, label="缩放 (Zoom)")
@@ -1800,51 +1797,51 @@ with gr.Blocks(
     num_frames.change(
         fn=_frame_slider_updates,
         inputs=[num_frames],
-        outputs=[bbox_frame_idx, point_frame_idx, camera_frame_idx],
+        outputs=[motion_frame_idx],
     )
 
     # ---- 切换帧时，重置画布为输入图像（避免跨帧残留笔迹） ----
-    bbox_frame_idx.change(fn=_reset_editor_canvas, inputs=[input_image], outputs=[bbox_editor])
-    point_frame_idx.change(fn=_reset_editor_canvas, inputs=[input_image], outputs=[point_editor])
+    motion_frame_idx.change(fn=_reset_editor_canvas, inputs=[input_image], outputs=[bbox_editor])
+    motion_frame_idx.change(fn=_reset_editor_canvas, inputs=[input_image], outputs=[point_editor])
 
     # ---- Bbox 关键帧保存/删除 ----
     bbox_save_btn.click(
         fn=save_bbox_keyframe,
-        inputs=[bbox_editor, bbox_frame_idx, bbox_kf_state],
+        inputs=[bbox_editor, motion_frame_idx, bbox_kf_state],
         outputs=[bbox_kf_state, bbox_json_text],
     )
     bbox_delete_btn.click(
         fn=delete_bbox_keyframe,
-        inputs=[bbox_frame_idx, bbox_kf_state],
+        inputs=[motion_frame_idx, bbox_kf_state],
         outputs=[bbox_kf_state, bbox_json_text],
     )
 
     # ---- Point 关键帧保存/删除 ----
     point_save_btn.click(
         fn=save_point_keyframe,
-        inputs=[point_editor, point_frame_idx, point_kf_state],
+        inputs=[point_editor, motion_frame_idx, point_kf_state],
         outputs=[point_kf_state, point_json_text],
     )
     point_delete_btn.click(
         fn=delete_point_keyframe,
-        inputs=[point_frame_idx, point_kf_state],
+        inputs=[motion_frame_idx, point_kf_state],
         outputs=[point_kf_state, point_json_text],
     )
 
     # ---- Camera 关键帧加载/保存/删除 ----
-    camera_frame_idx.change(
+    motion_frame_idx.change(
         fn=load_camera_keyframe,
-        inputs=[camera_frame_idx, camera_kf_state],
+        inputs=[motion_frame_idx, camera_kf_state],
         outputs=[camera_zoom, camera_pan_x, camera_pan_y, camera_rotation],
     )
     camera_save_btn.click(
         fn=save_camera_keyframe,
-        inputs=[camera_frame_idx, camera_zoom, camera_pan_x, camera_pan_y, camera_rotation, camera_kf_state],
+        inputs=[motion_frame_idx, camera_zoom, camera_pan_x, camera_pan_y, camera_rotation, camera_kf_state],
         outputs=[camera_kf_state, camera_json_text],
     )
     camera_delete_btn.click(
         fn=delete_camera_keyframe,
-        inputs=[camera_frame_idx, camera_kf_state],
+        inputs=[motion_frame_idx, camera_kf_state],
         outputs=[camera_kf_state, camera_json_text],
     )
 
