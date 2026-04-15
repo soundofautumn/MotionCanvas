@@ -877,6 +877,75 @@ def generate_point_json_from_editors(editor_start, editor_mid, editor_end, num_f
     return json.dumps({"points": tracks}, indent=2)
 
 
+def generate_model_params_from_ui(
+    input_image,
+    end_image,
+    num_frames,
+    height,
+    width,
+    bbox_json_text,
+    camera_json_text,
+    point_json_text,
+):
+    if not bbox_json_text or not bbox_json_text.strip():
+        raise gr.Error("请先提供 Bbox JSON")
+
+    bbox_mask = build_bbox_mask_from_json_str(
+        bbox_json_text, int(num_frames), int(height), int(width)
+    )
+    bbox_mask_path = os.path.join(tempfile.gettempdir(), "motioncanvas_bbox_mask_ui.pt")
+    torch.save(bbox_mask, bbox_mask_path)
+
+    camera_params = build_camera_params_from_json(camera_json_text, int(num_frames))
+    if camera_params is None:
+        camera_params = [
+            {"zoom": 1.0, "pan_x": 0.0, "pan_y": 0.0, "rotation": 0.0}
+            for _ in range(int(num_frames))
+        ]
+
+    background_tracks = generate_background_tracks(
+        camera_params,
+        int(num_frames),
+        int(height),
+        int(width),
+        bbox_mask=bbox_mask,
+        grid_size=14,
+    )
+
+    local_tracks = build_point_tracks_from_json(point_json_text, int(num_frames), int(height), int(width))
+    camera_applied_tracks = []
+    if local_tracks is not None:
+        for track in local_tracks:
+            cam_track = []
+            for f, (x, y) in enumerate(track):
+                params = camera_params[f]
+                tx, ty = apply_camera_transform_to_point(
+                    x,
+                    y,
+                    int(width),
+                    int(height),
+                    params["zoom"],
+                    params["pan_x"],
+                    params["pan_y"],
+                    params["rotation"],
+                )
+                cam_track.append((tx, ty))
+            camera_applied_tracks.append(cam_track)
+
+    all_tracks = background_tracks + camera_applied_tracks
+    track_video = build_track_video_from_tracks(all_tracks, int(num_frames), int(height), int(width))
+
+    track_video_path = None
+    if track_video is not None:
+        track_video_path = os.path.join(tempfile.gettempdir(), "motioncanvas_track_video_ui.pt")
+        torch.save(track_video, track_video_path)
+        status = "✅ 已生成 bbox_mask 和 track_video"
+    else:
+        status = "⚠️ 已生成 bbox_mask，但 track_video 为空（缺少轨迹）"
+
+    return bbox_mask_path, track_video_path, status
+
+
 # ==================== Camera Motion Control ====================
 
 def build_camera_params_from_json(json_str, num_frames):
@@ -954,6 +1023,79 @@ def apply_camera_transform(image, zoom, pan_x, pan_y, rotation):
     shifted = Image.new("RGB", (w, h), (0, 0, 0))
     shifted.paste(rotated, (int(round(pan_x)), int(round(pan_y))))
     return shifted
+
+
+def apply_camera_transform_to_point(x, y, width, height, zoom, pan_x, pan_y, rotation):
+    cx = width / 2.0
+    cy = height / 2.0
+    dx = x - cx
+    dy = y - cy
+    dx *= zoom
+    dy *= zoom
+    theta = math.radians(rotation)
+    cos_t = math.cos(theta)
+    sin_t = math.sin(theta)
+    rx = dx * cos_t - dy * sin_t
+    ry = dx * sin_t + dy * cos_t
+    return rx + cx + pan_x, ry + cy + pan_y
+
+
+def generate_background_tracks(camera_params, num_frames, height, width, bbox_mask=None, grid_size=14):
+    xs = np.linspace(0, width - 1, grid_size)
+    ys = np.linspace(0, height - 1, grid_size)
+    points = [(float(x), float(y)) for y in ys for x in xs]
+
+    if bbox_mask is not None:
+        mask = (bbox_mask[0, :, 0] > 0).any(dim=0).cpu().numpy()
+        points = [p for p in points if not mask[int(round(p[1])), int(round(p[0]))]]
+
+    tracks = []
+    for x, y in points:
+        track = []
+        for f in range(num_frames):
+            params = camera_params[f]
+            tx, ty = apply_camera_transform_to_point(
+                x,
+                y,
+                width,
+                height,
+                params["zoom"],
+                params["pan_x"],
+                params["pan_y"],
+                params["rotation"],
+            )
+            track.append((tx, ty))
+        tracks.append(track)
+    return tracks
+
+
+def build_track_video_from_tracks(tracks, num_frames, height, width):
+    if not tracks:
+        return None
+    n = len(tracks)
+    pred_tracks = torch.full((1, num_frames, n, 2), -1.0, dtype=torch.float32)
+    pred_visibility = torch.zeros((1, num_frames, n), dtype=torch.bool)
+
+    for i, track in enumerate(tracks):
+        for f, (x, y) in enumerate(track):
+            if 0 <= x < width and 0 <= y < height:
+                pred_tracks[0, f, i, 0] = float(x)
+                pred_tracks[0, f, i, 1] = float(y)
+                pred_visibility[0, f, i] = True
+
+    track_video, _ = create_pos_feature_map(
+        pred_tracks,
+        pred_visibility,
+        DEFAULT_DOWNSAMPLE_RATIOS,
+        height,
+        width,
+        DEFAULT_POS_EMB_DIM,
+        track_num=-1,
+        t_down_strategy="sample",
+        device=torch.device("cpu"),
+        dtype=torch.float32,
+    )
+    return track_video.permute(0, 4, 1, 2, 3)
 
 
 def build_point_tracks_from_json(json_str, num_frames, height, width):
@@ -1049,43 +1191,6 @@ def generate_camera_json_from_sliders(zoom_start, pan_x_start, pan_y_start, rota
     return json.dumps({"camera": {"keyframes": keyframes}}, indent=2)
 
 
-def generate_controls_from_3d(
-    camera_json_file,
-    objects_json_file,
-    points_json_file,
-    num_frames,
-    height,
-    width,
-    fov_deg,
-):
-    camera_json = _read_json_file(camera_json_file)
-    objects_json = _read_json_file(objects_json_file)
-    points_json = _read_json_file(points_json_file)
-
-    if camera_json is None or objects_json is None or points_json is None:
-        raise gr.Error("3D JSON 文件无效或缺失")
-
-    fx, fy, cx, cy = _build_intrinsics(int(width), int(height), float(fov_deg))
-    cam_poses = _compute_camera_poses(camera_json, int(num_frames))
-
-    bbox_2d = _build_bbox_json_3d(objects_json, cam_poses, int(width), int(height), fx, fy, cx, cy)
-    points_2d = _build_points_json_3d(points_json, objects_json, cam_poses, int(width), int(height), fx, fy, cx, cy)
-
-    bbox_mask = build_bbox_mask_from_json_str(json.dumps(bbox_2d), int(num_frames), int(height), int(width))
-    track_video = _build_track_video_from_points(points_2d, int(num_frames), int(height), int(width))
-
-    bbox_mask_path = os.path.join(tempfile.gettempdir(), "motioncanvas_bbox_mask.pt")
-    torch.save(bbox_mask, bbox_mask_path)
-
-    track_video_path = None
-    if track_video is not None:
-        track_video_path = os.path.join(tempfile.gettempdir(), "motioncanvas_track_video.pt")
-        torch.save(track_video, track_video_path)
-
-    bbox_json_text = json.dumps(bbox_2d, indent=2)
-    points_json_text = json.dumps(points_2d, indent=2)
-
-    return bbox_json_text, points_json_text, bbox_mask_path, track_video_path
 
 
 # ==================== Video Generation ====================
@@ -1315,6 +1420,10 @@ with gr.Blocks(
         # ---- 右侧：运动控制 + 输出 ----
         with gr.Column(scale=3, min_width=480):
             with gr.Accordion("运动控制", open=True):
+                gr.Markdown(
+                    "**流程**：用户在 UI 中设置相机/物体/局部运动 → 生成 2D 控制信号 → "
+                    "编码为模型参数（bbox_mask/track_video） → 视频生成。"
+                )
                 with gr.Tabs():
                     # ---- 可视化选区 Tab ----
                     with gr.Tab("可视化选区"):
@@ -1557,28 +1666,14 @@ with gr.Blocks(
                             track_video_file = gr.File(
                                 label="Track Video (.pt)", file_types=[".pt"],
                             )
+                        with gr.Row():
+                            gen_params_btn = gr.Button(
+                                "生成模型参数 (.pt)", variant="secondary"
+                            )
+                            params_status = gr.Textbox(
+                                label="参数状态", value="尚未生成", interactive=False
+                            )
 
-                    # ---- 3D Intent Tab ----
-                    with gr.Tab("3D 意图"):
-                        gr.Markdown(
-                            "基于 3D 相机/物体/点意图生成 2D 控制信号。"
-                            "当前实现仅做几何投影，不改动模型，也不依赖深度网络。"
-                        )
-                        with gr.Row():
-                            camera_json_file = gr.File(
-                                label="3D 相机 JSON", file_types=[".json"],
-                            )
-                            objects_json_file = gr.File(
-                                label="3D 物体 JSON", file_types=[".json"],
-                            )
-                            points_json_file = gr.File(
-                                label="3D 点轨迹 JSON", file_types=[".json"],
-                            )
-                        fov_deg = gr.Slider(
-                            30, 120, value=60, step=1, label="相机 FOV (deg)",
-                        )
-                        with gr.Row():
-                            gen_3d_btn = gr.Button("生成 2D 控制", variant="secondary")
 
             generate_btn = gr.Button(
                 "生成视频", variant="primary", size="lg",
@@ -1623,18 +1718,19 @@ with gr.Blocks(
         outputs=[camera_json_text],
     )
 
-    gen_3d_btn.click(
-        fn=generate_controls_from_3d,
+    gen_params_btn.click(
+        fn=generate_model_params_from_ui,
         inputs=[
-            camera_json_file,
-            objects_json_file,
-            points_json_file,
+            input_image,
+            end_image,
             num_frames,
             height,
             width,
-            fov_deg,
+            bbox_json_text,
+            camera_json_text,
+            point_json_text,
         ],
-        outputs=[bbox_json_text, point_json_text, bbox_mask_file, track_video_file],
+        outputs=[bbox_mask_file, track_video_file, params_status],
     )
 
     generate_btn.click(
