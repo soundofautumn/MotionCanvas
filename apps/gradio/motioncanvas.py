@@ -10,7 +10,7 @@ import json
 import math
 import torch
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageDraw
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
@@ -946,6 +946,84 @@ def generate_model_params_from_ui(
     return bbox_mask_path, track_video_path, status
 
 
+def preview_control_overlay(
+    input_image,
+    num_frames,
+    height,
+    width,
+    bbox_json_text,
+    camera_json_text,
+    point_json_text,
+):
+    if input_image is None:
+        raise gr.Error("请先上传输入图像")
+
+    base = input_image.resize((int(width), int(height))).convert("RGB")
+    draw = ImageDraw.Draw(base)
+
+    try:
+        bbox_data = json.loads(bbox_json_text) if bbox_json_text else {"objects": []}
+    except Exception as e:
+        raise gr.Error(f"Bbox JSON 解析失败: {e}")
+
+    for obj in bbox_data.get("objects", []):
+        frames = obj.get("frames", {})
+        bbox = _interp_bbox_for_frame(frames, 0, int(width), int(height))
+        if bbox is None:
+            continue
+        x1, y1, x2, y2 = bbox
+        draw.rectangle([x1, y1, x2, y2], outline=(255, 80, 80), width=3)
+
+    camera_params = build_camera_params_from_json(camera_json_text, int(num_frames))
+    if camera_params is None:
+        camera_params = [
+            {"zoom": 1.0, "pan_x": 0.0, "pan_y": 0.0, "rotation": 0.0}
+            for _ in range(int(num_frames))
+        ]
+
+    bbox_mask = None
+    if bbox_json_text and bbox_json_text.strip():
+        bbox_mask = build_bbox_mask_from_json_str(
+            bbox_json_text, int(num_frames), int(height), int(width)
+        )
+
+    bg_tracks = generate_background_tracks(
+        camera_params,
+        int(num_frames),
+        int(height),
+        int(width),
+        bbox_mask=bbox_mask,
+        grid_size=14,
+    )
+
+    local_tracks = build_point_tracks_from_json(point_json_text, int(num_frames), int(height), int(width))
+    camera_applied = []
+    if local_tracks is not None:
+        for track in local_tracks:
+            x, y = track[0]
+            params = camera_params[0]
+            tx, ty = apply_camera_transform_to_point(
+                x,
+                y,
+                int(width),
+                int(height),
+                params["zoom"],
+                params["pan_x"],
+                params["pan_y"],
+                params["rotation"],
+            )
+            camera_applied.append((tx, ty))
+
+    for track in bg_tracks:
+        x, y = track[0]
+        draw.ellipse([x - 2, y - 2, x + 2, y + 2], fill=(80, 160, 255))
+
+    for x, y in camera_applied:
+        draw.ellipse([x - 3, y - 3, x + 3, y + 3], fill=(255, 80, 80))
+
+    return base
+
+
 # ==================== Camera Motion Control ====================
 
 def build_camera_params_from_json(json_str, num_frames):
@@ -998,6 +1076,49 @@ def build_camera_params_from_json(json_str, num_frames):
         params.append(kf_data)
 
     return params
+
+
+def _interp_bbox_for_frame(frames, frame_idx, width, height):
+    keyframes = []
+    for fi_str, bbox in frames.items():
+        fi = int(fi_str)
+        x1, y1, x2, y2 = bbox
+        if all(0 <= v <= 1.0 for v in [x1, y1, x2, y2]):
+            x1, x2 = x1 * width, x2 * width
+            y1, y2 = y1 * height, y2 * height
+        keyframes.append((fi, float(x1), float(y1), float(x2), float(y2)))
+
+    if not keyframes:
+        return None
+
+    keyframes = sorted(keyframes, key=lambda x: x[0])
+    if frame_idx <= keyframes[0][0]:
+        _, x1, y1, x2, y2 = keyframes[0]
+    elif frame_idx >= keyframes[-1][0]:
+        _, x1, y1, x2, y2 = keyframes[-1]
+    else:
+        x1 = y1 = x2 = y2 = None
+        for idx in range(len(keyframes) - 1):
+            f0, x10, y10, x20, y20 = keyframes[idx]
+            f1, x11, y11, x21, y21 = keyframes[idx + 1]
+            if f0 <= frame_idx <= f1:
+                span = max(1, f1 - f0)
+                t = (frame_idx - f0) / span
+                x1 = x10 + (x11 - x10) * t
+                y1 = y10 + (y11 - y10) * t
+                x2 = x20 + (x21 - x20) * t
+                y2 = y20 + (y21 - y20) * t
+                break
+        if x1 is None:
+            return None
+
+    x1 = max(0.0, min(width - 1.0, x1))
+    y1 = max(0.0, min(height - 1.0, y1))
+    x2 = max(0.0, min(width - 1.0, x2))
+    y2 = max(0.0, min(height - 1.0, y2))
+    if x2 <= x1 or y2 <= y1:
+        return None
+    return x1, y1, x2, y2
 
 
 def apply_camera_transform(image, zoom, pan_x, pan_y, rotation):
@@ -1673,6 +1794,13 @@ with gr.Blocks(
                             params_status = gr.Textbox(
                                 label="参数状态", value="尚未生成", interactive=False
                             )
+                        with gr.Row():
+                            preview_btn = gr.Button(
+                                "预览 2D 控制", variant="secondary"
+                            )
+                        preview_image = gr.Image(
+                            label="2D 控制预览", interactive=False
+                        )
 
 
             generate_btn = gr.Button(
@@ -1731,6 +1859,20 @@ with gr.Blocks(
             point_json_text,
         ],
         outputs=[bbox_mask_file, track_video_file, params_status],
+    )
+
+    preview_btn.click(
+        fn=preview_control_overlay,
+        inputs=[
+            input_image,
+            num_frames,
+            height,
+            width,
+            bbox_json_text,
+            camera_json_text,
+            point_json_text,
+        ],
+        outputs=[preview_image],
     )
 
     generate_btn.click(
