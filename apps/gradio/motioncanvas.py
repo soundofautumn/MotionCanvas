@@ -8,6 +8,7 @@ import sys
 import tempfile
 import json
 import math
+import re
 import torch
 import numpy as np
 from PIL import Image, ImageDraw
@@ -84,6 +85,442 @@ pipe_state = {"pipe": None, "torch_dtype": None, "loaded_config": None, "cotrack
 
 DEFAULT_DOWNSAMPLE_RATIOS = [4, 8, 8]
 DEFAULT_POS_EMB_DIM = 16
+
+
+# ==================== LLM (OpenAI-Compatible) ====================
+
+LLM_SYSTEM_PROMPT = """你是一个 MotionCanvas 的动作/参数编辑助手。
+
+你必须只输出一个 JSON 对象（不要输出 Markdown，不要输出代码块，不要输出多余文本）。
+
+JSON 结构：
+{
+  "assistant_message": "给用户的简短说明（可选）",
+  "updates": {
+    "bbox_json": "...可选，字符串或对象，符合Bbox JSON格式...",
+    "point_json": "...可选，字符串或对象，符合Point JSON格式...",
+    "camera_json": "...可选，字符串或对象，符合Camera JSON格式...",
+    "prompt": "...可选...",
+    "negative_prompt": "...可选...",
+    "height": 480,
+    "width": 832,
+    "num_frames": 49,
+    "fps": 15,
+    "num_inference_steps": 50,
+    "cfg_scale": 5.0,
+    "sigma_shift": 5.0,
+    "seed": 42
+  }
+}
+
+规则：
+- 只在你非常确定时才改动；不需要改动就省略对应字段。
+- bbox_json / point_json / camera_json 若提供，必须是严格可解析的 JSON（对象或字符串均可）。
+- num_frames/width/height 等需给出合理范围内的值。
+"""
+
+
+def _snap_to_step(value, minimum, step, maximum):
+    try:
+        v = float(value)
+    except Exception:
+        return None
+    v = max(float(minimum), min(float(maximum), v))
+    if step and step > 0:
+        k = round((v - float(minimum)) / float(step))
+        v = float(minimum) + k * float(step)
+        v = max(float(minimum), min(float(maximum), v))
+    return v
+
+
+def _extract_json_object(text):
+    if text is None:
+        raise ValueError("空响应")
+    text = str(text).strip()
+    if not text:
+        raise ValueError("空响应")
+
+    # 直接是 JSON
+    try:
+        return json.loads(text)
+    except Exception:
+        pass
+
+    # 尝试从 ```json ... ``` 中提取
+    m = re.search(r"```(?:json)?\s*(\{[\s\S]*?\})\s*```", text, flags=re.IGNORECASE)
+    if m:
+        return json.loads(m.group(1))
+
+    # 尝试从首个 {...} 提取（贪婪会吞太多，这里做最小匹配）
+    m2 = re.search(r"(\{[\s\S]*\})", text)
+    if m2:
+        return json.loads(m2.group(1))
+
+    raise ValueError("无法从模型输出中解析 JSON")
+
+
+def _ensure_json_text(value):
+    if value is None:
+        return None
+    if isinstance(value, str):
+        s = value.strip()
+        return s
+    # dict/list → 转成格式化 JSON
+    return json.dumps(value, ensure_ascii=False, indent=2)
+
+
+def _normalize_openai_base_url(base_url):
+    s = (base_url or "").strip()
+    if not s:
+        raise ValueError("base_url 不能为空")
+    # 允许用户填 https://api.deepseek.com 或 https://api.deepseek.com/v1
+    s = s.rstrip("/")
+    return s
+
+
+def _openai_chat_complete(
+    base_url,
+    api_key,
+    model,
+    messages,
+    temperature=0.2,
+    timeout=60,
+    force_json=True,
+):
+    base = _normalize_openai_base_url(base_url)
+    # OpenAI SDK 默认 base_url 类似 https://api.openai.com/v1
+    if not base.endswith("/v1"):
+        base = base + "/v1"
+
+    try:
+        from openai import OpenAI
+    except Exception as e:
+        raise RuntimeError(
+            "未安装 OpenAI Python SDK（openai）。请先安装：pip install openai"
+        ) from e
+
+    client = OpenAI(
+        base_url=base,
+        api_key=(str(api_key).strip() if api_key is not None else ""),
+        timeout=float(timeout),
+    )
+
+    kwargs = {
+        "model": (model or "").strip(),
+        "messages": messages,
+        "temperature": float(temperature),
+    }
+    if force_json:
+        kwargs["response_format"] = {"type": "json_object"}
+
+    try:
+        resp = client.chat.completions.create(**kwargs)
+    except Exception:
+        # 兼容部分后端不支持 response_format
+        if force_json and "response_format" in kwargs:
+            kwargs.pop("response_format", None)
+            resp = client.chat.completions.create(**kwargs)
+        else:
+            raise
+
+    # 返回与旧结构一致的 dict，方便下游处理与测试 mock
+    try:
+        dumped = resp.model_dump()
+        return dumped
+    except Exception:
+        # 兜底：手动拼装
+        content = None
+        try:
+            content = resp.choices[0].message.content
+        except Exception:
+            content = ""
+        return {"choices": [{"message": {"content": content}}]}
+
+
+def _bbox_state_from_json_text(bbox_json_text):
+    if not bbox_json_text or not str(bbox_json_text).strip():
+        return {}
+    data = json.loads(bbox_json_text)
+    objects = data.get("objects", [])
+    if not objects:
+        return {}
+    frames = objects[0].get("frames", {})
+    out = {}
+    for fi_str, bbox in (frames or {}).items():
+        out[str(int(fi_str))] = bbox
+    return out
+
+
+def _point_state_from_json_text(point_json_text):
+    if not point_json_text or not str(point_json_text).strip():
+        return {}
+    data = json.loads(point_json_text)
+    points = data.get("points", [])
+    if not points:
+        return {}
+    frame_to_points = {}
+    for pt in points:
+        frames = pt.get("frames", {})
+        for fi_str, xy in (frames or {}).items():
+            fi = str(int(fi_str))
+            frame_to_points.setdefault(fi, []).append(xy)
+    # 保持每帧点的顺序稳定（按出现顺序）
+    return frame_to_points
+
+
+def _camera_state_from_json_text(camera_json_text):
+    if not camera_json_text or not str(camera_json_text).strip():
+        return {}
+    data = json.loads(camera_json_text)
+    keyframes = data.get("camera", {}).get("keyframes", [])
+    if not keyframes:
+        return {}
+    out = {}
+    for kf in keyframes:
+        fi = str(int(kf.get("frame", 0)))
+        pan = kf.get("pan", [0.0, 0.0])
+        out[fi] = {
+            "zoom": float(kf.get("zoom", 1.0)),
+            "pan_x": float(pan[0] if isinstance(pan, list) and len(pan) > 0 else 0.0),
+            "pan_y": float(pan[1] if isinstance(pan, list) and len(pan) > 1 else 0.0),
+            "rotation": float(kf.get("rotation", 0.0)),
+        }
+    return out
+
+
+def llm_apply_instruction(
+    user_message,
+    chat_history,
+    llm_base_url,
+    llm_api_key,
+    llm_model,
+    llm_timeout,
+    bbox_json_text,
+    camera_json_text,
+    point_json_text,
+    prompt,
+    negative_prompt,
+    height,
+    width,
+    num_frames,
+    fps,
+    num_inference_steps,
+    cfg_scale,
+    sigma_shift,
+    seed,
+    motion_frame_idx,
+    bbox_kf_state,
+    point_kf_state,
+    camera_kf_state,
+):
+    user_message = (user_message or "").strip()
+    if not user_message:
+        raise gr.Error("请输入你的要求")
+
+    history = list(chat_history or [])
+
+    # 组装 messages：系统提示 + 历史对话 + 本次用户输入（附带当前状态）
+    messages = [{"role": "system", "content": LLM_SYSTEM_PROMPT}]
+    for u, a in history:
+        if u:
+            messages.append({"role": "user", "content": str(u)})
+        if a:
+            messages.append({"role": "assistant", "content": str(a)})
+
+    state_blob = {
+        "prompt": prompt,
+        "negative_prompt": negative_prompt,
+        "height": int(height),
+        "width": int(width),
+        "num_frames": int(num_frames),
+        "fps": int(fps),
+        "num_inference_steps": int(num_inference_steps),
+        "cfg_scale": float(cfg_scale),
+        "sigma_shift": float(sigma_shift),
+        "seed": int(seed),
+        "bbox_json": bbox_json_text or "",
+        "camera_json": camera_json_text or "",
+        "point_json": point_json_text or "",
+        "current_frame_idx": int(motion_frame_idx),
+    }
+
+    user_payload = (
+        "用户需求：\n"
+        + user_message
+        + "\n\n当前状态（可作为你生成 updates 的依据）：\n"
+        + json.dumps(state_blob, ensure_ascii=False)
+    )
+    messages.append({"role": "user", "content": user_payload})
+
+    try:
+        resp = _openai_chat_complete(
+            base_url=llm_base_url,
+            api_key=llm_api_key,
+            model=(llm_model or "").strip(),
+            messages=messages,
+            temperature=0.2,
+            timeout=float(llm_timeout),
+            force_json=True,
+        )
+        content = resp["choices"][0]["message"]["content"]
+        obj = _extract_json_object(content)
+    except Exception as e:
+        history.append((user_message, f"❌ LLM 调用失败：{e}"))
+        return (
+            history,
+            bbox_json_text,
+            point_json_text,
+            camera_json_text,
+            bbox_kf_state,
+            point_kf_state,
+            camera_kf_state,
+            prompt,
+            negative_prompt,
+            height,
+            width,
+            num_frames,
+            fps,
+            num_inference_steps,
+            cfg_scale,
+            sigma_shift,
+            seed,
+            gr.update(),
+            "LLM 调用失败（见对话）",
+            "",
+        )
+
+    updates = obj.get("updates", {}) if isinstance(obj, dict) else {}
+    assistant_msg = obj.get("assistant_message") if isinstance(obj, dict) else None
+
+    new_bbox_json = bbox_json_text
+    new_point_json = point_json_text
+    new_camera_json = camera_json_text
+    new_prompt = prompt
+    new_negative_prompt = negative_prompt
+    new_height = height
+    new_width = width
+    new_num_frames = num_frames
+    new_fps = fps
+    new_steps = num_inference_steps
+    new_cfg = cfg_scale
+    new_sigma = sigma_shift
+    new_seed = seed
+
+    try:
+        if "bbox_json" in updates:
+            new_bbox_json = _ensure_json_text(updates.get("bbox_json")) or ""
+            if new_bbox_json.strip():
+                json.loads(new_bbox_json)
+
+        if "point_json" in updates:
+            new_point_json = _ensure_json_text(updates.get("point_json")) or ""
+            if new_point_json.strip():
+                json.loads(new_point_json)
+
+        if "camera_json" in updates:
+            new_camera_json = _ensure_json_text(updates.get("camera_json")) or ""
+            if new_camera_json.strip():
+                json.loads(new_camera_json)
+
+        if "prompt" in updates and updates.get("prompt") is not None:
+            new_prompt = str(updates.get("prompt"))
+        if "negative_prompt" in updates and updates.get("negative_prompt") is not None:
+            new_negative_prompt = str(updates.get("negative_prompt"))
+
+        if "height" in updates:
+            snapped = _snap_to_step(updates.get("height"), 256, 16, 1280)
+            if snapped is not None:
+                new_height = int(snapped)
+        if "width" in updates:
+            snapped = _snap_to_step(updates.get("width"), 256, 16, 1280)
+            if snapped is not None:
+                new_width = int(snapped)
+        if "num_frames" in updates:
+            snapped = _snap_to_step(updates.get("num_frames"), 5, 4, 121)
+            if snapped is not None:
+                new_num_frames = int(snapped)
+        if "fps" in updates:
+            snapped = _snap_to_step(updates.get("fps"), 8, 1, 30)
+            if snapped is not None:
+                new_fps = int(snapped)
+        if "num_inference_steps" in updates:
+            snapped = _snap_to_step(updates.get("num_inference_steps"), 10, 1, 100)
+            if snapped is not None:
+                new_steps = int(snapped)
+        if "cfg_scale" in updates:
+            val = float(updates.get("cfg_scale"))
+            new_cfg = max(1.0, min(15.0, val))
+        if "sigma_shift" in updates:
+            val = float(updates.get("sigma_shift"))
+            new_sigma = max(1.0, min(15.0, val))
+        if "seed" in updates:
+            new_seed = int(updates.get("seed"))
+
+        # 同步 State（保证后续“保存/删除关键帧”不和 JSON 脱节）
+        new_bbox_state = _bbox_state_from_json_text(new_bbox_json)
+        new_point_state = _point_state_from_json_text(new_point_json)
+        new_camera_state = _camera_state_from_json_text(new_camera_json)
+    except Exception as e:
+        history.append((user_message, f"❌ 解析/应用更新失败：{e}"))
+        return (
+            history,
+            bbox_json_text,
+            point_json_text,
+            camera_json_text,
+            bbox_kf_state,
+            point_kf_state,
+            camera_kf_state,
+            prompt,
+            negative_prompt,
+            height,
+            width,
+            num_frames,
+            fps,
+            num_inference_steps,
+            cfg_scale,
+            sigma_shift,
+            seed,
+            gr.update(),
+            "LLM 输出不合法（未应用）",
+            "",
+        )
+
+    msg = assistant_msg or "✅ 已应用更新"
+    history.append((user_message, msg))
+
+    # 如果帧数变化，更新全局帧滑条范围
+    nf = int(new_num_frames)
+    max_frame = max(0, nf - 1)
+    cur_frame = int(motion_frame_idx)
+    new_frame_val = min(cur_frame, max_frame)
+    frame_update = gr.update(minimum=0, maximum=max_frame, value=new_frame_val)
+
+    return (
+        history,
+        new_bbox_json,
+        new_point_json,
+        new_camera_json,
+        new_bbox_state,
+        new_point_state,
+        new_camera_state,
+        new_prompt,
+        new_negative_prompt,
+        new_height,
+        new_width,
+        new_num_frames,
+        new_fps,
+        new_steps,
+        new_cfg,
+        new_sigma,
+        new_seed,
+        frame_update,
+        "✅ 已应用 LLM 更新",
+        "",
+    )
+
+
+def llm_clear_chat():
+    return [], ""
 
 
 # ==================== Model Loading ====================
@@ -1717,6 +2154,47 @@ with gr.Blocks(
                             label="2D 控制预览视频", interactive=False
                         )
 
+                        gr.Markdown("### LLM 助手（DeepSeek / OpenAI 兼容）", elem_classes="section-title")
+                        with gr.Accordion("对话与配置", open=True):
+                            with gr.Row():
+                                llm_base_url = gr.Textbox(
+                                    label="Base URL",
+                                    value="https://api.deepseek.com",
+                                    placeholder="例如：https://api.deepseek.com 或 http://127.0.0.1:8000",
+                                )
+                                llm_model = gr.Textbox(
+                                    label="Model",
+                                    value="deepseek-chat",
+                                    placeholder="例如：deepseek-chat / gpt-4o-mini / 你的本地模型名",
+                                )
+                            with gr.Row():
+                                llm_api_key = gr.Textbox(
+                                    label="API Key",
+                                    type="password",
+                                    placeholder="若服务端不需要可留空",
+                                )
+                                llm_timeout = gr.Slider(
+                                    5, 180, value=60, step=1, label="请求超时 (秒)"
+                                )
+
+                            llm_chatbot = gr.Chatbot(
+                                label="对话",
+                                height=260,
+                            )
+                            llm_status = gr.Textbox(
+                                label="LLM 状态",
+                                value="",
+                                interactive=False,
+                            )
+                            with gr.Row():
+                                llm_user_msg = gr.Textbox(
+                                    label="你的要求",
+                                    placeholder="例如：让相机逐渐推近，同时把局部点轨迹改成从左到右",
+                                )
+                            with gr.Row():
+                                llm_send_btn = gr.Button("发送并应用", variant="primary")
+                                llm_clear_btn = gr.Button("清空对话", variant="secondary")
+
                     # ---- JSON / 高级 Tab ----
                     with gr.Tab("JSON / 高级选项"):
                         gr.Markdown("#### 物体运动")
@@ -1739,19 +2217,7 @@ with gr.Blocks(
                         point_json_text = gr.Code(
                             label="Point Trajectory JSON",
                             language="json",
-                            value=(
-                                "{\n"
-                                "  \"points\": [\n"
-                                "    {\n"
-                                "      \"frames\": {\n"
-                                "        \"0\": [0.5, 0.5],\n"
-                                "        \"24\": [0.6, 0.55],\n"
-                                "        \"48\": [0.7, 0.6]\n"
-                                "      }\n"
-                                "    }\n"
-                                "  ]\n"
-                                "}"
-                            ),
+                            value="",
                             lines=10,
                         )
 
@@ -1873,6 +2339,114 @@ with gr.Blocks(
             fps,
         ],
         outputs=[preview_video],
+    )
+
+    llm_send_btn.click(
+        fn=llm_apply_instruction,
+        inputs=[
+            llm_user_msg,
+            llm_chatbot,
+            llm_base_url,
+            llm_api_key,
+            llm_model,
+            llm_timeout,
+            bbox_json_text,
+            camera_json_text,
+            point_json_text,
+            prompt,
+            negative_prompt,
+            height,
+            width,
+            num_frames,
+            fps,
+            num_inference_steps,
+            cfg_scale,
+            sigma_shift,
+            seed,
+            motion_frame_idx,
+            bbox_kf_state,
+            point_kf_state,
+            camera_kf_state,
+        ],
+        outputs=[
+            llm_chatbot,
+            bbox_json_text,
+            point_json_text,
+            camera_json_text,
+            bbox_kf_state,
+            point_kf_state,
+            camera_kf_state,
+            prompt,
+            negative_prompt,
+            height,
+            width,
+            num_frames,
+            fps,
+            num_inference_steps,
+            cfg_scale,
+            sigma_shift,
+            seed,
+            motion_frame_idx,
+            llm_status,
+            llm_user_msg,
+        ],
+    )
+
+    llm_user_msg.submit(
+        fn=llm_apply_instruction,
+        inputs=[
+            llm_user_msg,
+            llm_chatbot,
+            llm_base_url,
+            llm_api_key,
+            llm_model,
+            llm_timeout,
+            bbox_json_text,
+            camera_json_text,
+            point_json_text,
+            prompt,
+            negative_prompt,
+            height,
+            width,
+            num_frames,
+            fps,
+            num_inference_steps,
+            cfg_scale,
+            sigma_shift,
+            seed,
+            motion_frame_idx,
+            bbox_kf_state,
+            point_kf_state,
+            camera_kf_state,
+        ],
+        outputs=[
+            llm_chatbot,
+            bbox_json_text,
+            point_json_text,
+            camera_json_text,
+            bbox_kf_state,
+            point_kf_state,
+            camera_kf_state,
+            prompt,
+            negative_prompt,
+            height,
+            width,
+            num_frames,
+            fps,
+            num_inference_steps,
+            cfg_scale,
+            sigma_shift,
+            seed,
+            motion_frame_idx,
+            llm_status,
+            llm_user_msg,
+        ],
+    )
+
+    llm_clear_btn.click(
+        fn=llm_clear_chat,
+        inputs=[],
+        outputs=[llm_chatbot, llm_user_msg],
     )
 
     generate_btn.click(
