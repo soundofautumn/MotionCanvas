@@ -826,6 +826,7 @@ def preview_control_overlay(
     bbox_json_text,
     camera_json_text,
     point_json_text,
+    frame_idx=0,
 ):
     if input_image is None:
         raise gr.Error("请先上传输入图像")
@@ -840,7 +841,7 @@ def preview_control_overlay(
 
     for obj in bbox_data.get("objects", []):
         frames = obj.get("frames", {})
-        bbox = _interp_bbox_for_frame(frames, 0, int(width), int(height))
+        bbox = _interp_bbox_for_frame(frames, frame_idx, int(width), int(height))
         if bbox is None:
             continue
         x1, y1, x2, y2 = bbox
@@ -872,8 +873,11 @@ def preview_control_overlay(
     camera_applied = []
     if local_tracks is not None:
         for track in local_tracks:
-            x, y = track[0]
-            params = camera_params[0]
+            if frame_idx < len(track):
+                x, y = track[frame_idx]
+            else:
+                x, y = track[0]
+            params = camera_params[frame_idx] if frame_idx < len(camera_params) else camera_params[0]
             tx, ty = apply_camera_transform_to_point(
                 x,
                 y,
@@ -887,14 +891,16 @@ def preview_control_overlay(
             camera_applied.append((tx, ty))
 
     for track in bg_tracks:
-        x, y = track[0]
+        if frame_idx < len(track):
+            x, y = track[frame_idx]
+        else:
+            x, y = track[0]
         draw.ellipse([x - 2, y - 2, x + 2, y + 2], fill=(80, 160, 255))
 
     for x, y in camera_applied:
         draw.ellipse([x - 3, y - 3, x + 3, y + 3], fill=(255, 80, 80))
 
     return base
-
 
 # ==================== Camera Motion Control ====================
 
@@ -1666,6 +1672,11 @@ with gr.Blocks(
                             params_status = gr.Textbox(
                                 label="参数状态", value="尚未生成", interactive=False
                             )
+
+                        with gr.Row():
+                            preview_frame_idx = gr.Slider(
+                                minimum=0, maximum=48, value=0, step=1, label="预览帧号 (Frame)", interactive=True
+                            )
                         with gr.Row():
                             preview_btn = gr.Button(
                                 "预览 2D 控制", variant="secondary"
@@ -1733,6 +1744,12 @@ with gr.Blocks(
         outputs=[bbox_mask_file, track_video_file, params_status],
     )
 
+
+    def _update_preview_frame_max(nf):
+        return gr.update(maximum=int(nf)-1, value=0)
+
+    num_frames.change(_update_preview_frame_max, inputs=[num_frames], outputs=[preview_frame_idx])
+
     preview_btn.click(
         fn=preview_control_overlay,
         inputs=[
@@ -1743,6 +1760,22 @@ with gr.Blocks(
             bbox_json_text,
             camera_json_text,
             point_json_text,
+            preview_frame_idx,
+        ],
+        outputs=[preview_image],
+    )
+
+    preview_frame_idx.change(
+        fn=preview_control_overlay,
+        inputs=[
+            input_image,
+            num_frames,
+            height,
+            width,
+            bbox_json_text,
+            camera_json_text,
+            point_json_text,
+            preview_frame_idx,
         ],
         outputs=[preview_image],
     )
