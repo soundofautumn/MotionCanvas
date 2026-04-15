@@ -693,60 +693,182 @@ def extract_points_from_editor(editor_data, max_points=20):
 
 
 def sync_image_to_editors(input_image):
-    """将输入图像同步到关键帧画布作为背景。"""
+    """将输入图像同步到画布作为背景。"""
     if input_image is None:
-        return None, None, None, None, None, None
+        return None, None
     img = np.array(input_image)
-    return img, img, img, img, img, img
+    return img, img
 
 
-def generate_bbox_json_from_editors(editor_start, editor_mid, editor_end, num_frames):
-    """从三个关键帧画布的涂抹区域提取 bbox 并生成 JSON。"""
-    bbox_start = extract_bbox_from_editor(editor_start)
-    bbox_mid = extract_bbox_from_editor(editor_mid)
-    bbox_end = extract_bbox_from_editor(editor_end)
-
-    if all(b is None for b in [bbox_start, bbox_mid, bbox_end]):
-        return ""
-
+def _frame_slider_updates(num_frames):
     nf = int(num_frames)
-    frames = {}
-    if bbox_start is not None:
-        frames["0"] = bbox_start
-    if bbox_mid is not None:
-        frames[str(nf // 2)] = bbox_mid
-    if bbox_end is not None:
-        frames[str(nf - 1)] = bbox_end
+    max_v = max(0, nf - 1)
+    upd = gr.update(minimum=0, maximum=max_v, value=0)
+    return upd, upd, upd
 
+
+def _bbox_state_to_json(bbox_state):
+    frames = {}
+    for k, v in (bbox_state or {}).items():
+        frames[str(int(k))] = v
+    frames = dict(sorted(frames.items(), key=lambda kv: int(kv[0])))
+    if not frames:
+        return ""
     return json.dumps({"objects": [{"frames": frames}]}, indent=2)
 
 
-def generate_point_json_from_editors(editor_start, editor_mid, editor_end, num_frames):
-    points_start = extract_points_from_editor(editor_start, max_points=20)
-    points_mid = extract_points_from_editor(editor_mid, max_points=20)
-    points_end = extract_points_from_editor(editor_end, max_points=20)
+def save_bbox_keyframe(bbox_editor_data, frame_idx, bbox_state):
+    bbox = extract_bbox_from_editor(bbox_editor_data)
+    state = dict(bbox_state or {})
+    fi = str(int(frame_idx))
+    if bbox is None:
+        if fi in state:
+            del state[fi]
+    else:
+        state[fi] = bbox
+    return state, _bbox_state_to_json(state)
 
-    if not points_start and not points_mid and not points_end:
+
+def delete_bbox_keyframe(frame_idx, bbox_state):
+    state = dict(bbox_state or {})
+    fi = str(int(frame_idx))
+    if fi in state:
+        del state[fi]
+    return state, _bbox_state_to_json(state)
+
+
+def _extract_points_norm_from_editor(editor_data, max_points=20):
+    if editor_data is None:
+        return []
+    layers = editor_data.get("layers", [])
+    if not layers:
+        return []
+
+    points = []
+    for layer in layers:
+        if not isinstance(layer, np.ndarray):
+            continue
+        if layer.ndim == 3 and layer.shape[2] >= 4:
+            alpha = layer[:, :, 3]
+        elif layer.ndim == 3:
+            alpha = np.any(layer > 0, axis=2).astype(np.uint8) * 255
+        elif layer.ndim == 2:
+            alpha = layer
+        else:
+            continue
+
+        h, w = alpha.shape[:2]
+        coords = np.argwhere(alpha > 0)
+        if coords.size == 0:
+            continue
+        if coords.shape[0] > max_points:
+            idx = np.linspace(0, coords.shape[0] - 1, max_points).astype(int)
+            coords = coords[idx]
+        for y, x in coords:
+            if w <= 0 or h <= 0:
+                continue
+            points.append((round(float(x) / w, 4), round(float(y) / h, 4)))
+
+    return points[:max_points]
+
+
+def _point_state_to_json(point_state):
+    state = {str(int(k)): v for k, v in (point_state or {}).items()}
+    state = dict(sorted(state.items(), key=lambda kv: int(kv[0])))
+    if not state:
         return ""
 
-    nf = int(num_frames)
-    max_len = max(len(points_start), len(points_mid), len(points_end))
+    max_len = 0
+    for pts in state.values():
+        if isinstance(pts, list):
+            max_len = max(max_len, len(pts))
+
     tracks = []
     for idx in range(max_len):
         frames = {}
-        if idx < len(points_start):
-            frames["0"] = points_start[idx]
-        if idx < len(points_mid):
-            frames[str(nf // 2)] = points_mid[idx]
-        if idx < len(points_end):
-            frames[str(nf - 1)] = points_end[idx]
+        for fi_str, pts in state.items():
+            if idx < len(pts):
+                frames[fi_str] = list(pts[idx])
         if frames:
             tracks.append({"frames": frames})
 
     if not tracks:
         return ""
-
     return json.dumps({"points": tracks}, indent=2)
+
+
+def save_point_keyframe(point_editor_data, frame_idx, point_state):
+    pts = _extract_points_norm_from_editor(point_editor_data, max_points=20)
+    state = dict(point_state or {})
+    fi = str(int(frame_idx))
+    if not pts:
+        if fi in state:
+            del state[fi]
+    else:
+        state[fi] = pts
+    return state, _point_state_to_json(state)
+
+
+def delete_point_keyframe(frame_idx, point_state):
+    state = dict(point_state or {})
+    fi = str(int(frame_idx))
+    if fi in state:
+        del state[fi]
+    return state, _point_state_to_json(state)
+
+
+def _camera_state_to_json(camera_state):
+    state = {str(int(k)): v for k, v in (camera_state or {}).items()}
+    state = dict(sorted(state.items(), key=lambda kv: int(kv[0])))
+    if not state:
+        return ""
+    keyframes = []
+    for fi_str, params in state.items():
+        keyframes.append(
+            {
+                "frame": int(fi_str),
+                "zoom": float(params.get("zoom", 1.0)),
+                "pan": [float(params.get("pan_x", 0.0)), float(params.get("pan_y", 0.0))],
+                "rotation": float(params.get("rotation", 0.0)),
+            }
+        )
+    return json.dumps({"camera": {"keyframes": keyframes}}, indent=2)
+
+
+def load_camera_keyframe(frame_idx, camera_state):
+    state = dict(camera_state or {})
+    fi = str(int(frame_idx))
+    params = state.get(fi)
+    if not isinstance(params, dict):
+        return 1.0, 0.0, 0.0, 0.0
+    return (
+        float(params.get("zoom", 1.0)),
+        float(params.get("pan_x", 0.0)),
+        float(params.get("pan_y", 0.0)),
+        float(params.get("rotation", 0.0)),
+    )
+
+
+def save_camera_keyframe(frame_idx, zoom, pan_x, pan_y, rotation, camera_state):
+    state = dict(camera_state or {})
+    fi = str(int(frame_idx))
+    state[fi] = {
+        "zoom": float(zoom),
+        "pan_x": float(pan_x),
+        "pan_y": float(pan_y),
+        "rotation": float(rotation),
+    }
+    return state, _camera_state_to_json(state)
+
+
+def delete_camera_keyframe(frame_idx, camera_state):
+    state = dict(camera_state or {})
+    fi = str(int(frame_idx))
+    if fi in state:
+        del state[fi]
+    return state, _camera_state_to_json(state)
+
+
 
 
 def generate_model_params_from_ui(
@@ -1272,17 +1394,10 @@ def build_point_masks_from_tracks(point_tracks, num_frames, height, width, radiu
     return torch.stack(masks, dim=0)
 
 
-def generate_camera_json_from_sliders(zoom_start, pan_x_start, pan_y_start, rotation_start,
-                                      zoom_mid, pan_x_mid, pan_y_mid, rotation_mid,
-                                      zoom_end, pan_x_end, pan_y_end, rotation_end, num_frames):
-    """从滑块值生成相机 JSON"""
-    nf = int(num_frames)
-    keyframes = [
-        {"frame": 0, "zoom": zoom_start, "pan": [pan_x_start, pan_y_start], "rotation": rotation_start},
-        {"frame": nf // 2, "zoom": zoom_mid, "pan": [pan_x_mid, pan_y_mid], "rotation": rotation_mid},
-        {"frame": nf - 1, "zoom": zoom_end, "pan": [pan_x_end, pan_y_end], "rotation": rotation_end},
-    ]
-    return json.dumps({"camera": {"keyframes": keyframes}}, indent=2)
+def _reset_editor_canvas(input_image):
+    if input_image is None:
+        return None
+    return np.array(input_image)
 
 
 
