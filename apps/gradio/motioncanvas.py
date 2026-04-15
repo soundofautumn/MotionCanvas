@@ -1634,16 +1634,18 @@ with gr.Blocks(
                     "编码为模型参数（bbox_mask/track_video） → 视频生成。"
                 )
                 with gr.Tabs():
-                    # ---- 可视化选区 Tab ----
-                    with gr.Tab("可视化选区"):
+                    # ---- 运动编辑（合并）Tab ----
+                    with gr.Tab("运动编辑"):
                         gr.Markdown(
-                            "上传输入图像后，在下方画布上**涂抹标记物体区域**，"
-                            "并用帧滑条选择当前要编辑的帧。点击“保存当前帧选区”即可将该帧写入关键帧。"
+                            "在同一个页面里编辑三种运动：**物体Bbox**、**局部点**、**相机**。\n"
+                            "用各自的帧滑条选择当前帧 → 编辑 → 保存为关键帧；系统会自动生成对应 JSON。"
                         )
+
                         sync_btn = gr.Button(
                             "同步输入图像到画布", size="sm", variant="secondary",
                         )
 
+                        gr.Markdown("### 物体运动（Bbox）", elem_classes="section-title")
                         bbox_kf_state = gr.State({})
                         with gr.Row():
                             bbox_frame_idx = gr.Slider(
@@ -1667,13 +1669,7 @@ with gr.Blocks(
                             bbox_save_btn = gr.Button("保存当前帧选区", variant="secondary")
                             bbox_delete_btn = gr.Button("删除当前帧选区", variant="secondary")
 
-                    # ---- 局部运动 Tab ----
-                    with gr.Tab("局部运动"):
-                        gr.Markdown(
-                            "用帧滑条选择当前要编辑的帧，然后在画布上点涂/拖拽标记局部点。"
-                            "点击“保存当前帧点”会把该帧写入关键帧，并自动生成点轨迹 JSON。"
-                        )
-
+                        gr.Markdown("### 局部运动（点轨迹）", elem_classes="section-title")
                         point_kf_state = gr.State({})
                         with gr.Row():
                             point_frame_idx = gr.Slider(
@@ -1697,13 +1693,7 @@ with gr.Blocks(
                             point_save_btn = gr.Button("保存当前帧点", variant="secondary")
                             point_delete_btn = gr.Button("删除当前帧点", variant="secondary")
 
-                    # ---- 相机运动 Tab ----
-                    with gr.Tab("相机运动"):
-                        gr.Markdown(
-                            "用帧滑条选择当前要编辑的帧，然后调整相机参数并保存为关键帧。\n"
-                            "模型会自动对关键帧之间进行插值。"
-                        )
-
+                        gr.Markdown("### 相机运动", elem_classes="section-title")
                         camera_kf_state = gr.State({})
                         with gr.Row():
                             camera_frame_idx = gr.Slider(
@@ -1720,6 +1710,15 @@ with gr.Blocks(
                         with gr.Row():
                             camera_save_btn = gr.Button("保存当前帧相机", variant="secondary")
                             camera_delete_btn = gr.Button("删除当前帧相机", variant="secondary")
+
+                        gr.Markdown("### 轨迹预览", elem_classes="section-title")
+                        with gr.Row():
+                            preview_btn = gr.Button(
+                                "预览 2D 控制", variant="secondary"
+                            )
+                        preview_video = gr.Video(
+                            label="2D 控制预览视频", interactive=False
+                        )
 
                     # ---- JSON / 高级 Tab ----
                     with gr.Tab("JSON / 高级选项"):
@@ -1775,13 +1774,6 @@ with gr.Blocks(
                                 label="参数状态", value="尚未生成", interactive=False
                             )
 
-                        with gr.Row():
-                            preview_btn = gr.Button(
-                                "预览 2D 控制", variant="secondary"
-                            )
-                        preview_video = gr.Video(
-                            label="2D 控制预览视频", interactive=False
-                        )
 
 
             generate_btn = gr.Button(
