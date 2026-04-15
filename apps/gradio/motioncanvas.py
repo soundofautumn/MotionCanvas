@@ -7,6 +7,7 @@ import os
 import sys
 import tempfile
 import json
+import math
 import torch
 import numpy as np
 from PIL import Image
@@ -16,7 +17,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 import gradio as gr
 from diffsynth import ModelManager, save_video
 from diffsynth.pipelines.wan_video_motioncanvas import WanVideoPipeline_motioncanvas
-from diffsynth.pipelines.tracker_utils import get_video_track_video
+from diffsynth.pipelines.tracker_utils import get_video_track_video, create_pos_feature_map
 
 DEFAULT_NEGATIVE_PROMPT = (
     "Bright tones, overexposed, static, blurred details, subtitles, style, works, "
@@ -80,6 +81,9 @@ CUSTOM_CSS = """
 """
 
 pipe_state = {"pipe": None, "torch_dtype": None, "loaded_config": None, "cotracker": None}
+
+DEFAULT_DOWNSAMPLE_RATIOS = [4, 8, 8]
+DEFAULT_POS_EMB_DIM = 16
 
 
 # ==================== Model Loading ====================
@@ -193,6 +197,298 @@ def build_bbox_mask_from_json_str(json_str, num_frames, height, width):
             y1, y2 = max(0, y1), min(height, y2)
             mask[:, :, fi, y1:y2, x1:x2] = 1.0
     return mask * 2.0 - 1.0
+
+
+def _read_json_file(file_obj):
+    if file_obj is None:
+        return None
+    if isinstance(file_obj, str):
+        path = file_obj
+    elif isinstance(file_obj, dict) and "name" in file_obj:
+        path = file_obj["name"]
+    else:
+        path = getattr(file_obj, "name", None)
+    if not path or not os.path.exists(path):
+        return None
+    with open(path, "r") as f:
+        return json.load(f)
+
+
+def _lerp(a, b, t):
+    return a * (1.0 - t) + b * t
+
+
+def _euler_yaw_pitch_roll_to_matrix(yaw_deg, pitch_deg, roll_deg):
+    yaw = math.radians(yaw_deg)
+    pitch = math.radians(pitch_deg)
+    roll = math.radians(roll_deg)
+
+    cy, sy = math.cos(yaw), math.sin(yaw)
+    cp, sp = math.cos(pitch), math.sin(pitch)
+    cr, sr = math.cos(roll), math.sin(roll)
+
+    r_y = np.array([[cy, 0.0, sy], [0.0, 1.0, 0.0], [-sy, 0.0, cy]], dtype=np.float32)
+    r_x = np.array([[1.0, 0.0, 0.0], [0.0, cp, -sp], [0.0, sp, cp]], dtype=np.float32)
+    r_z = np.array([[cr, -sr, 0.0], [sr, cr, 0.0], [0.0, 0.0, 1.0]], dtype=np.float32)
+
+    return r_z @ r_x @ r_y
+
+
+def _interpolate_keyframes(keyframes, num_frames, fields):
+    if not keyframes:
+        return []
+    keyframes_sorted = sorted(keyframes, key=lambda k: int(k.get("frame", 0)))
+    frames_out = []
+    for frame_idx in range(num_frames):
+        prev_kf = keyframes_sorted[0]
+        next_kf = keyframes_sorted[-1]
+        for kf in keyframes_sorted:
+            if int(kf.get("frame", 0)) <= frame_idx:
+                prev_kf = kf
+            if int(kf.get("frame", 0)) >= frame_idx:
+                next_kf = kf
+                break
+
+        f0 = int(prev_kf.get("frame", 0))
+        f1 = int(next_kf.get("frame", 0))
+        t = 0.0 if f0 == f1 else (frame_idx - f0) / max(1, f1 - f0)
+
+        out = {"frame": frame_idx}
+        for field in fields:
+            v0 = prev_kf.get(field)
+            v1 = next_kf.get(field)
+            if isinstance(v0, list) and isinstance(v1, list):
+                out[field] = [_lerp(v0[i], v1[i], t) for i in range(len(v0))]
+            else:
+                out[field] = _lerp(float(v0), float(v1), t)
+        frames_out.append(out)
+    return frames_out
+
+
+def _build_intrinsics(width, height, fov_deg):
+    fov = math.radians(fov_deg)
+    fx = 0.5 * width / math.tan(0.5 * fov)
+    fy = fx
+    cx = width / 2.0
+    cy = height / 2.0
+    return fx, fy, cx, cy
+
+
+def _project_world_to_pixel(point_w, cam_pos, cam_rot, fx, fy, cx, cy):
+    p_cam = cam_rot.T @ (point_w - cam_pos)
+    z = p_cam[2]
+    if z <= 1e-6:
+        return None
+    x = (p_cam[0] / z) * fx + cx
+    y = (p_cam[1] / z) * fy + cy
+    return x, y, z
+
+
+def _compute_camera_poses(camera_json, num_frames):
+    keyframes = camera_json.get("camera", {}).get("keyframes", [])
+    interpolated = _interpolate_keyframes(keyframes, num_frames, ["pos", "rot"])
+    poses = []
+    for kf in interpolated:
+        pos = np.array(kf.get("pos", [0.0, 0.0, 0.0]), dtype=np.float32)
+        rot = kf.get("rot", [0.0, 0.0, 0.0])
+        rot_m = _euler_yaw_pitch_roll_to_matrix(rot[0], rot[1], rot[2])
+        poses.append({"pos": pos, "rot_m": rot_m})
+    return poses
+
+
+def _interpolate_object_frames(obj, num_frames):
+    keyframes = obj.get("keyframes", [])
+    return _interpolate_keyframes(keyframes, num_frames, ["center", "size"])
+
+
+def _project_object_bbox(obj_frames, camera_poses, width, height, fx, fy, cx, cy):
+    frames_out = {}
+    for frame in obj_frames:
+        f = int(frame["frame"])
+        center = np.array(frame.get("center", [0.0, 0.0, 0.0]), dtype=np.float32)
+        size = np.array(frame.get("size", [1.0, 1.0, 1.0]), dtype=np.float32)
+        half = size * 0.5
+
+        corners = []
+        for sx in (-1.0, 1.0):
+            for sy in (-1.0, 1.0):
+                for sz in (-1.0, 1.0):
+                    corners.append(center + half * np.array([sx, sy, sz], dtype=np.float32))
+
+        cam = camera_poses[f]
+        pts_2d = []
+        for c in corners:
+            proj = _project_world_to_pixel(c, cam["pos"], cam["rot_m"], fx, fy, cx, cy)
+            if proj is not None:
+                pts_2d.append((proj[0], proj[1]))
+
+        if not pts_2d:
+            continue
+
+        xs = [p[0] for p in pts_2d]
+        ys = [p[1] for p in pts_2d]
+        x1, y1, x2, y2 = min(xs), min(ys), max(xs), max(ys)
+        x1 = max(0.0, min(width - 1.0, x1))
+        y1 = max(0.0, min(height - 1.0, y1))
+        x2 = max(0.0, min(width - 1.0, x2))
+        y2 = max(0.0, min(height - 1.0, y2))
+        if x2 <= x1 or y2 <= y1:
+            continue
+
+        frames_out[str(f)] = [x1 / width, y1 / height, x2 / width, y2 / height]
+
+    return frames_out
+
+
+def _build_bbox_json_3d(objects_json, camera_poses, width, height, fx, fy, cx, cy):
+    objects_out = []
+    for obj in objects_json.get("objects", []):
+        obj_frames = _interpolate_object_frames(obj, len(camera_poses))
+        frames_out = _project_object_bbox(obj_frames, camera_poses, width, height, fx, fy, cx, cy)
+        if frames_out:
+            objects_out.append({"frames": frames_out, "id": obj.get("id", "")})
+    return {"objects": objects_out}
+
+
+def _interpolate_point_keyframes(keyframes, num_frames):
+    kf_items = sorted([(int(k), v) for k, v in keyframes.items()], key=lambda x: x[0])
+    if not kf_items:
+        return []
+
+    tracks = []
+    for frame_idx in range(num_frames):
+        prev_kf = kf_items[0]
+        next_kf = kf_items[-1]
+        for kf in kf_items:
+            if kf[0] <= frame_idx:
+                prev_kf = kf
+            if kf[0] >= frame_idx:
+                next_kf = kf
+                break
+
+        f0 = prev_kf[0]
+        f1 = next_kf[0]
+        t = 0.0 if f0 == f1 else (frame_idx - f0) / max(1, f1 - f0)
+        v0 = prev_kf[1]
+        v1 = next_kf[1]
+        tracks.append([_lerp(v0[i], v1[i], t) for i in range(len(v0))])
+
+    return tracks
+
+
+def _object_frame_lookup(objects_json, num_frames):
+    lookup = {}
+    for obj in objects_json.get("objects", []):
+        obj_id = obj.get("id")
+        if not obj_id:
+            continue
+        lookup[obj_id] = _interpolate_object_frames(obj, num_frames)
+    return lookup
+
+
+def _point_world_from_object_local(local_xyz, obj_frame):
+    center = np.array(obj_frame.get("center", [0.0, 0.0, 0.0]), dtype=np.float32)
+    size = np.array(obj_frame.get("size", [1.0, 1.0, 1.0]), dtype=np.float32)
+    local = np.array(local_xyz, dtype=np.float32) - 0.5
+    return center + local * size
+
+
+def _build_points_json_3d(points_json, objects_json, camera_poses, width, height, fx, fy, cx, cy):
+    points_out = []
+    obj_lookup = _object_frame_lookup(objects_json, len(camera_poses))
+
+    for point in points_json.get("points", []):
+        space = point.get("space", "world")
+        obj_id = point.get("object_id", "")
+        keyframes = point.get("frames", {})
+        tracks_3d = _interpolate_point_keyframes(keyframes, len(camera_poses))
+        if not tracks_3d:
+            continue
+
+        frames_out = {}
+        for f, pos in enumerate(tracks_3d):
+            if space == "object":
+                obj_frames = obj_lookup.get(obj_id)
+                if not obj_frames:
+                    continue
+                world = _point_world_from_object_local(pos, obj_frames[f])
+            else:
+                world = np.array(pos, dtype=np.float32)
+
+            cam = camera_poses[f]
+            proj = _project_world_to_pixel(world, cam["pos"], cam["rot_m"], fx, fy, cx, cy)
+            if proj is None:
+                continue
+            x, y, _ = proj
+            if x < 0 or x >= width or y < 0 or y >= height:
+                continue
+            frames_out[str(f)] = [x / width, y / height]
+
+        if frames_out:
+            points_out.append({"frames": frames_out})
+
+    return {"points": points_out}
+
+
+def _build_track_video_from_points(points_json, num_frames, height, width):
+    points = points_json.get("points", [])
+    if not points:
+        return None
+
+    tracks = []
+    for pt in points:
+        frames = pt.get("frames", {})
+        if not frames:
+            continue
+        tracks.append(frames)
+    if not tracks:
+        return None
+
+    n = len(tracks)
+    pred_tracks = torch.full((1, num_frames, n, 2), -1.0, dtype=torch.float32)
+    pred_visibility = torch.zeros((1, num_frames, n), dtype=torch.bool)
+
+    for i, frames in enumerate(tracks):
+        kf_items = sorted([(int(k), v) for k, v in frames.items()], key=lambda x: x[0])
+        if not kf_items:
+            continue
+        for f, xy in kf_items:
+            x, y = xy
+            if 0.0 <= x <= 1.0 and 0.0 <= y <= 1.0:
+                x = x * width
+                y = y * height
+            pred_tracks[0, f, i, 0] = float(x)
+            pred_tracks[0, f, i, 1] = float(y)
+            pred_visibility[0, f, i] = True
+
+        if len(kf_items) >= 2:
+            for j in range(len(kf_items) - 1):
+                f0, v0 = kf_items[j]
+                f1, v1 = kf_items[j + 1]
+                for f in range(f0, f1 + 1):
+                    t = 0.0 if f0 == f1 else (f - f0) / max(1, f1 - f0)
+                    x = _lerp(v0[0], v1[0], t)
+                    y = _lerp(v0[1], v1[1], t)
+                    if 0.0 <= x <= 1.0 and 0.0 <= y <= 1.0:
+                        x = x * width
+                        y = y * height
+                    pred_tracks[0, f, i, 0] = float(x)
+                    pred_tracks[0, f, i, 1] = float(y)
+                    pred_visibility[0, f, i] = True
+
+    track_video, _ = create_pos_feature_map(
+        pred_tracks,
+        pred_visibility,
+        DEFAULT_DOWNSAMPLE_RATIOS,
+        height,
+        width,
+        DEFAULT_POS_EMB_DIM,
+        track_num=-1,
+        t_down_strategy="sample",
+        device=torch.device("cpu"),
+        dtype=torch.float32,
+    )
+    return track_video.permute(0, 4, 1, 2, 3)
 
 
 def build_object_masks_from_bbox_json_interpolated(json_str, num_frames, height, width):
@@ -753,6 +1049,45 @@ def generate_camera_json_from_sliders(zoom_start, pan_x_start, pan_y_start, rota
     return json.dumps({"camera": {"keyframes": keyframes}}, indent=2)
 
 
+def generate_controls_from_3d(
+    camera_json_file,
+    objects_json_file,
+    points_json_file,
+    num_frames,
+    height,
+    width,
+    fov_deg,
+):
+    camera_json = _read_json_file(camera_json_file)
+    objects_json = _read_json_file(objects_json_file)
+    points_json = _read_json_file(points_json_file)
+
+    if camera_json is None or objects_json is None or points_json is None:
+        raise gr.Error("3D JSON 文件无效或缺失")
+
+    fx, fy, cx, cy = _build_intrinsics(int(width), int(height), float(fov_deg))
+    cam_poses = _compute_camera_poses(camera_json, int(num_frames))
+
+    bbox_2d = _build_bbox_json_3d(objects_json, cam_poses, int(width), int(height), fx, fy, cx, cy)
+    points_2d = _build_points_json_3d(points_json, objects_json, cam_poses, int(width), int(height), fx, fy, cx, cy)
+
+    bbox_mask = build_bbox_mask_from_json_str(json.dumps(bbox_2d), int(num_frames), int(height), int(width))
+    track_video = _build_track_video_from_points(points_2d, int(num_frames), int(height), int(width))
+
+    bbox_mask_path = os.path.join(tempfile.gettempdir(), "motioncanvas_bbox_mask.pt")
+    torch.save(bbox_mask, bbox_mask_path)
+
+    track_video_path = None
+    if track_video is not None:
+        track_video_path = os.path.join(tempfile.gettempdir(), "motioncanvas_track_video.pt")
+        torch.save(track_video, track_video_path)
+
+    bbox_json_text = json.dumps(bbox_2d, indent=2)
+    points_json_text = json.dumps(points_2d, indent=2)
+
+    return bbox_json_text, points_json_text, bbox_mask_path, track_video_path
+
+
 # ==================== Video Generation ====================
 
 def generate_video(
@@ -1223,6 +1558,28 @@ with gr.Blocks(
                                 label="Track Video (.pt)", file_types=[".pt"],
                             )
 
+                    # ---- 3D Intent Tab ----
+                    with gr.Tab("3D 意图"):
+                        gr.Markdown(
+                            "基于 3D 相机/物体/点意图生成 2D 控制信号。"
+                            "当前实现仅做几何投影，不改动模型，也不依赖深度网络。"
+                        )
+                        with gr.Row():
+                            camera_json_file = gr.File(
+                                label="3D 相机 JSON", file_types=[".json"],
+                            )
+                            objects_json_file = gr.File(
+                                label="3D 物体 JSON", file_types=[".json"],
+                            )
+                            points_json_file = gr.File(
+                                label="3D 点轨迹 JSON", file_types=[".json"],
+                            )
+                        fov_deg = gr.Slider(
+                            30, 120, value=60, step=1, label="相机 FOV (deg)",
+                        )
+                        with gr.Row():
+                            gen_3d_btn = gr.Button("生成 2D 控制", variant="secondary")
+
             generate_btn = gr.Button(
                 "生成视频", variant="primary", size="lg",
                 elem_classes="generate-btn",
@@ -1264,6 +1621,20 @@ with gr.Blocks(
             num_frames,
         ],
         outputs=[camera_json_text],
+    )
+
+    gen_3d_btn.click(
+        fn=generate_controls_from_3d,
+        inputs=[
+            camera_json_file,
+            objects_json_file,
+            points_json_file,
+            num_frames,
+            height,
+            width,
+            fov_deg,
+        ],
+        outputs=[bbox_json_text, point_json_text, bbox_mask_file, track_video_file],
     )
 
     generate_btn.click(
