@@ -265,15 +265,6 @@ def _interpolate_keyframes(keyframes, num_frames, fields):
     return frames_out
 
 
-def _build_intrinsics(width, height, fov_deg):
-    fov = math.radians(fov_deg)
-    fx = 0.5 * width / math.tan(0.5 * fov)
-    fy = fx
-    cx = width / 2.0
-    cy = height / 2.0
-    return fx, fy, cx, cy
-
-
 def _project_world_to_pixel(point_w, cam_pos, cam_rot, fx, fy, cx, cy):
     p_cam = cam_rot.T @ (point_w - cam_pos)
     z = p_cam[2]
@@ -283,17 +274,6 @@ def _project_world_to_pixel(point_w, cam_pos, cam_rot, fx, fy, cx, cy):
     y = (p_cam[1] / z) * fy + cy
     return x, y, z
 
-
-def _compute_camera_poses(camera_json, num_frames):
-    keyframes = camera_json.get("camera", {}).get("keyframes", [])
-    interpolated = _interpolate_keyframes(keyframes, num_frames, ["pos", "rot"])
-    poses = []
-    for kf in interpolated:
-        pos = np.array(kf.get("pos", [0.0, 0.0, 0.0]), dtype=np.float32)
-        rot = kf.get("rot", [0.0, 0.0, 0.0])
-        rot_m = _euler_yaw_pitch_roll_to_matrix(rot[0], rot[1], rot[2])
-        poses.append({"pos": pos, "rot_m": rot_m})
-    return poses
 
 
 def _interpolate_object_frames(obj, num_frames):
@@ -340,16 +320,6 @@ def _project_object_bbox(obj_frames, camera_poses, width, height, fx, fy, cx, cy
     return frames_out
 
 
-def _build_bbox_json_3d(objects_json, camera_poses, width, height, fx, fy, cx, cy):
-    objects_out = []
-    for obj in objects_json.get("objects", []):
-        obj_frames = _interpolate_object_frames(obj, len(camera_poses))
-        frames_out = _project_object_bbox(obj_frames, camera_poses, width, height, fx, fy, cx, cy)
-        if frames_out:
-            objects_out.append({"frames": frames_out, "id": obj.get("id", "")})
-    return {"objects": objects_out}
-
-
 def _interpolate_point_keyframes(keyframes, num_frames):
     kf_items = sorted([(int(k), v) for k, v in keyframes.items()], key=lambda x: x[0])
     if not kf_items:
@@ -391,104 +361,6 @@ def _point_world_from_object_local(local_xyz, obj_frame):
     size = np.array(obj_frame.get("size", [1.0, 1.0, 1.0]), dtype=np.float32)
     local = np.array(local_xyz, dtype=np.float32) - 0.5
     return center + local * size
-
-
-def _build_points_json_3d(points_json, objects_json, camera_poses, width, height, fx, fy, cx, cy):
-    points_out = []
-    obj_lookup = _object_frame_lookup(objects_json, len(camera_poses))
-
-    for point in points_json.get("points", []):
-        space = point.get("space", "world")
-        obj_id = point.get("object_id", "")
-        keyframes = point.get("frames", {})
-        tracks_3d = _interpolate_point_keyframes(keyframes, len(camera_poses))
-        if not tracks_3d:
-            continue
-
-        frames_out = {}
-        for f, pos in enumerate(tracks_3d):
-            if space == "object":
-                obj_frames = obj_lookup.get(obj_id)
-                if not obj_frames:
-                    continue
-                world = _point_world_from_object_local(pos, obj_frames[f])
-            else:
-                world = np.array(pos, dtype=np.float32)
-
-            cam = camera_poses[f]
-            proj = _project_world_to_pixel(world, cam["pos"], cam["rot_m"], fx, fy, cx, cy)
-            if proj is None:
-                continue
-            x, y, _ = proj
-            if x < 0 or x >= width or y < 0 or y >= height:
-                continue
-            frames_out[str(f)] = [x / width, y / height]
-
-        if frames_out:
-            points_out.append({"frames": frames_out})
-
-    return {"points": points_out}
-
-
-def _build_track_video_from_points(points_json, num_frames, height, width):
-    points = points_json.get("points", [])
-    if not points:
-        return None
-
-    tracks = []
-    for pt in points:
-        frames = pt.get("frames", {})
-        if not frames:
-            continue
-        tracks.append(frames)
-    if not tracks:
-        return None
-
-    n = len(tracks)
-    pred_tracks = torch.full((1, num_frames, n, 2), -1.0, dtype=torch.float32)
-    pred_visibility = torch.zeros((1, num_frames, n), dtype=torch.bool)
-
-    for i, frames in enumerate(tracks):
-        kf_items = sorted([(int(k), v) for k, v in frames.items()], key=lambda x: x[0])
-        if not kf_items:
-            continue
-        for f, xy in kf_items:
-            x, y = xy
-            if 0.0 <= x <= 1.0 and 0.0 <= y <= 1.0:
-                x = x * width
-                y = y * height
-            pred_tracks[0, f, i, 0] = float(x)
-            pred_tracks[0, f, i, 1] = float(y)
-            pred_visibility[0, f, i] = True
-
-        if len(kf_items) >= 2:
-            for j in range(len(kf_items) - 1):
-                f0, v0 = kf_items[j]
-                f1, v1 = kf_items[j + 1]
-                for f in range(f0, f1 + 1):
-                    t = 0.0 if f0 == f1 else (f - f0) / max(1, f1 - f0)
-                    x = _lerp(v0[0], v1[0], t)
-                    y = _lerp(v0[1], v1[1], t)
-                    if 0.0 <= x <= 1.0 and 0.0 <= y <= 1.0:
-                        x = x * width
-                        y = y * height
-                    pred_tracks[0, f, i, 0] = float(x)
-                    pred_tracks[0, f, i, 1] = float(y)
-                    pred_visibility[0, f, i] = True
-
-    track_video, _ = create_pos_feature_map(
-        pred_tracks,
-        pred_visibility,
-        DEFAULT_DOWNSAMPLE_RATIOS,
-        height,
-        width,
-        DEFAULT_POS_EMB_DIM,
-        track_num=-1,
-        t_down_strategy="sample",
-        device=torch.device("cpu"),
-        dtype=torch.float32,
-    )
-    return track_video.permute(0, 4, 1, 2, 3)
 
 
 def build_object_masks_from_bbox_json_interpolated(json_str, num_frames, height, width):
@@ -1431,7 +1303,7 @@ with gr.Blocks(
     )
 
     # ---- 模型配置 ----
-    with gr.Accordion("模型配置", open=False):
+    with gr.Accordion("模型配置", open=True):
         with gr.Row():
             with gr.Column(scale=1):
                 dit_path = gr.Textbox(
@@ -1448,12 +1320,12 @@ with gr.Blocks(
                     value="/root/autodl-tmp/models/wan_1.3b/"
                           "models_t5_umt5-xxl-enc-bf16.pth",
                 )
-            with gr.Column(scale=1):
                 image_encoder_path = gr.Textbox(
                     label="Image Encoder 路径（I2V 可选）",
                     value="/root/autodl-tmp/models/wan_1.3b/"
                           "models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth",
                 )
+            with gr.Column(scale=1):
                 motion_controller_path = gr.Textbox(
                     label="Motion Controller 路径（可选）",
                     value="/root/autodl-tmp/models/DiffSynth-Studio/"
