@@ -902,6 +902,101 @@ def preview_control_overlay(
 
     return base
 
+
+def preview_control_video(
+    input_image,
+    num_frames,
+    height,
+    width,
+    bbox_json_text,
+    camera_json_text,
+    point_json_text,
+    fps=15,
+):
+    if input_image is None:
+        raise gr.Error("请先上传输入图像")
+
+    num_frames = int(num_frames)
+    height = int(height)
+    width = int(width)
+    fps = int(fps)
+
+    base_frame = input_image.resize((width, height)).convert("RGB")
+
+    try:
+        bbox_data = json.loads(bbox_json_text) if bbox_json_text else {"objects": []}
+    except Exception as e:
+        raise gr.Error(f"Bbox JSON 解析失败: {e}")
+
+    camera_params = build_camera_params_from_json(camera_json_text, num_frames)
+    if camera_params is None:
+        camera_params = [
+            {"zoom": 1.0, "pan_x": 0.0, "pan_y": 0.0, "rotation": 0.0}
+            for _ in range(num_frames)
+        ]
+
+    bbox_mask = None
+    if bbox_json_text and bbox_json_text.strip():
+        bbox_mask = build_bbox_mask_from_json_str(bbox_json_text, num_frames, height, width)
+
+    bg_tracks = generate_background_tracks(
+        camera_params,
+        num_frames,
+        height,
+        width,
+        bbox_mask=bbox_mask,
+        grid_size=14,
+    )
+
+    local_tracks = build_point_tracks_from_json(point_json_text, num_frames, height, width)
+
+    frames = []
+    for frame_idx in range(num_frames):
+        img = base_frame.copy()
+        draw = ImageDraw.Draw(img)
+
+        for obj in bbox_data.get("objects", []):
+            obj_frames = obj.get("frames", {})
+            bbox = _interp_bbox_for_frame(obj_frames, frame_idx, width, height)
+            if bbox is None:
+                continue
+            x1, y1, x2, y2 = bbox
+            draw.rectangle([x1, y1, x2, y2], outline=(255, 80, 80), width=3)
+
+        for track in bg_tracks:
+            if frame_idx < len(track):
+                x, y = track[frame_idx]
+            else:
+                x, y = track[0]
+            draw.ellipse([x - 2, y - 2, x + 2, y + 2], fill=(80, 160, 255))
+
+        if local_tracks is not None:
+            params = camera_params[frame_idx] if frame_idx < len(camera_params) else camera_params[0]
+            for track in local_tracks:
+                if frame_idx < len(track):
+                    x, y = track[frame_idx]
+                else:
+                    x, y = track[0]
+                tx, ty = apply_camera_transform_to_point(
+                    x,
+                    y,
+                    width,
+                    height,
+                    params["zoom"],
+                    params["pan_x"],
+                    params["pan_y"],
+                    params["rotation"],
+                )
+                draw.ellipse([tx - 3, ty - 3, tx + 3, ty + 3], fill=(255, 80, 80))
+
+        frames.append(img)
+
+    tmp = tempfile.NamedTemporaryFile(prefix="motioncanvas_preview_", suffix=".mp4", delete=False)
+    tmp_path = tmp.name
+    tmp.close()
+    save_video(frames, tmp_path, fps=max(1, fps), quality=5)
+    return tmp_path
+
 # ==================== Camera Motion Control ====================
 
 def build_camera_params_from_json(json_str, num_frames):
@@ -1674,15 +1769,11 @@ with gr.Blocks(
                             )
 
                         with gr.Row():
-                            preview_frame_idx = gr.Slider(
-                                minimum=0, maximum=48, value=0, step=1, label="预览帧号 (Frame)", interactive=True
-                            )
-                        with gr.Row():
                             preview_btn = gr.Button(
                                 "预览 2D 控制", variant="secondary"
                             )
-                        preview_image = gr.Image(
-                            label="2D 控制预览", interactive=False
+                        preview_video = gr.Video(
+                            label="2D 控制预览视频", interactive=False
                         )
 
 
@@ -1744,14 +1835,8 @@ with gr.Blocks(
         outputs=[bbox_mask_file, track_video_file, params_status],
     )
 
-
-    def _update_preview_frame_max(nf):
-        return gr.update(maximum=int(nf)-1, value=0)
-
-    num_frames.change(_update_preview_frame_max, inputs=[num_frames], outputs=[preview_frame_idx])
-
     preview_btn.click(
-        fn=preview_control_overlay,
+        fn=preview_control_video,
         inputs=[
             input_image,
             num_frames,
@@ -1760,24 +1845,9 @@ with gr.Blocks(
             bbox_json_text,
             camera_json_text,
             point_json_text,
-            preview_frame_idx,
+            fps,
         ],
-        outputs=[preview_image],
-    )
-
-    preview_frame_idx.change(
-        fn=preview_control_overlay,
-        inputs=[
-            input_image,
-            num_frames,
-            height,
-            width,
-            bbox_json_text,
-            camera_json_text,
-            point_json_text,
-            preview_frame_idx,
-        ],
-        outputs=[preview_image],
+        outputs=[preview_video],
     )
 
     generate_btn.click(
