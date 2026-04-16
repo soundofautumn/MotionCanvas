@@ -1735,12 +1735,12 @@ with gr.Blocks(
                             with gr.Row():
                                 llm_base_url = gr.Textbox(
                                     label="Base URL",
-                                    value="https://api.deepseek.com",
+                                    value="https://api.siliconflow.cn/v1",
                                     placeholder="例如：https://api.deepseek.com 或 http://127.0.0.1:8000",
                                 )
                                 llm_model = gr.Textbox(
                                     label="Model",
-                                    value="deepseek-chat",
+                                    value="Pro/moonshotai/Kimi-K2.5",
                                     placeholder="例如：deepseek-chat / gpt-4o-mini / 你的本地模型名",
                                 )
                             with gr.Row():
