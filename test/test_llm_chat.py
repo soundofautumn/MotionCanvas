@@ -95,6 +95,8 @@ def test_llm_apply_instruction_applies_updates(monkeypatch):
         llm_api_key="",
         llm_model="deepseek-chat",
         llm_timeout=30,
+        input_image=None,
+        llm_send_image=False,
         bbox_json_text="",
         camera_json_text="",
         point_json_text="",
@@ -177,6 +179,8 @@ def test_llm_apply_instruction_applies_ops(monkeypatch):
         llm_api_key="",
         llm_model="deepseek-chat",
         llm_timeout=30,
+        input_image=None,
+        llm_send_image=False,
         bbox_json_text=m._bbox_state_to_json(bbox_state),
         camera_json_text="",
         point_json_text="",
@@ -224,3 +228,56 @@ def test_llm_apply_instruction_applies_ops(monkeypatch):
     assert new_point_json == ""
     assert new_point_state == {}
     assert isinstance(new_camera_state, dict)
+
+
+def test_llm_apply_instruction_sends_image_when_enabled(monkeypatch):
+    from apps.gradio import motioncanvas as m
+    from PIL import Image
+
+    captured = {}
+
+    def _fake_complete(**kwargs):
+        captured["messages"] = kwargs.get("messages")
+        content = json.dumps({"assistant_message": "ok", "updates": {}}, ensure_ascii=False)
+        return {"choices": [{"message": {"content": content}}]}
+
+    monkeypatch.setattr(m, "_openai_chat_complete", lambda **kw: _fake_complete(**kw))
+
+    img = Image.new("RGB", (4, 4), (255, 0, 0))
+
+    _ = m.llm_apply_instruction(
+        user_message="see image",
+        chat_history=[],
+        llm_base_url="https://api.deepseek.com",
+        llm_api_key="",
+        llm_model="deepseek-chat",
+        llm_timeout=30,
+        input_image=img,
+        llm_send_image=True,
+        bbox_json_text="",
+        camera_json_text="",
+        point_json_text="",
+        prompt="old",
+        negative_prompt="neg",
+        height=480,
+        width=832,
+        num_frames=49,
+        fps=15,
+        num_inference_steps=50,
+        cfg_scale=5.0,
+        sigma_shift=5.0,
+        seed=42,
+        motion_frame_idx=0,
+        bbox_kf_state={},
+        point_kf_state={},
+        camera_kf_state={},
+    )
+
+    msgs = captured.get("messages")
+    assert isinstance(msgs, list)
+    last = msgs[-1]
+    assert last["role"] == "user"
+    assert isinstance(last["content"], list)
+    assert last["content"][0]["type"] == "text"
+    assert last["content"][1]["type"] == "image_url"
+    assert last["content"][1]["image_url"]["url"].startswith("data:image/jpeg;base64,")

@@ -9,6 +9,8 @@ import tempfile
 import json
 import math
 import re
+import base64
+import io
 import torch
 import numpy as np
 from PIL import Image, ImageDraw
@@ -179,6 +181,35 @@ def _ensure_json_text(value):
         return s
     # dict/list → 转成格式化 JSON
     return json.dumps(value, ensure_ascii=False, indent=2)
+
+
+def pil_to_data_url(input_image, max_side=768, image_format="JPEG", jpeg_quality=85):
+    if input_image is None:
+        raise ValueError("input_image 为空")
+
+    img = input_image.convert("RGB")
+    w, h = img.size
+    if w <= 0 or h <= 0:
+        raise ValueError("无效的图像尺寸")
+
+    max_side = int(max_side)
+    if max_side > 0:
+        scale = min(1.0, float(max_side) / float(max(w, h)))
+        if scale < 1.0:
+            img = img.resize((max(1, int(round(w * scale))), max(1, int(round(h * scale)))), Image.BILINEAR)
+
+    buf = io.BytesIO()
+    fmt = str(image_format or "JPEG").upper()
+    if fmt == "PNG":
+        img.save(buf, format="PNG")
+        mime = "image/png"
+    else:
+        # JPEG 通常更小，适合走 base64
+        img.save(buf, format="JPEG", quality=int(jpeg_quality), optimize=True)
+        mime = "image/jpeg"
+
+    b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+    return f"data:{mime};base64,{b64}"
 
 
 def _normalize_openai_base_url(base_url):
@@ -543,6 +574,8 @@ def llm_apply_instruction(
     llm_api_key,
     llm_model,
     llm_timeout,
+    input_image,
+    llm_send_image,
     bbox_json_text,
     camera_json_text,
     point_json_text,
@@ -598,7 +631,22 @@ def llm_apply_instruction(
         + "\n\n当前状态（可作为你生成 ops / updates 的依据）：\n"
         + json.dumps(state_blob, ensure_ascii=False)
     )
-    messages.append({"role": "user", "content": user_payload})
+
+    if bool(llm_send_image):
+        if input_image is None:
+            raise gr.Error("已勾选发送图片，但未上传起始帧图像")
+        data_url = pil_to_data_url(input_image, max_side=768)
+        messages.append(
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": user_payload},
+                    {"type": "image_url", "image_url": {"url": data_url}},
+                ],
+            }
+        )
+    else:
+        messages.append({"role": "user", "content": user_payload})
 
     try:
         resp = _openai_chat_complete(
@@ -2455,6 +2503,11 @@ with gr.Blocks(
                                     5, 180, value=60, step=1, label="请求超时 (秒)"
                                 )
 
+                            llm_send_image = gr.Checkbox(
+                                label="发送起始帧图像给 LLM（多模态，模型需支持 Vision）",
+                                value=False,
+                            )
+
                             llm_chatbot = gr.Chatbot(
                                 label="对话",
                                 height=260,
@@ -2628,6 +2681,8 @@ with gr.Blocks(
             llm_api_key,
             llm_model,
             llm_timeout,
+            input_image,
+            llm_send_image,
             bbox_json_text,
             camera_json_text,
             point_json_text,
@@ -2679,6 +2734,8 @@ with gr.Blocks(
             llm_api_key,
             llm_model,
             llm_timeout,
+            input_image,
+            llm_send_image,
             bbox_json_text,
             camera_json_text,
             point_json_text,
