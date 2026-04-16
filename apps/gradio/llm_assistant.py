@@ -16,7 +16,6 @@ import base64
 import io
 import json
 import math
-import os
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -25,11 +24,6 @@ from PIL import Image
 
 
 # ==================== Debug logging ====================
-
-
-def _llm_debug_enabled() -> bool:
-    v = (os.getenv("MOTIONCANVAS_LLM_DEBUG") or "").strip().lower()
-    return v in {"1", "true", "yes", "y", "on"}
 
 
 def _truncate_for_log(text: Any, limit: int = 2000) -> str:
@@ -47,9 +41,6 @@ def _redact_data_urls(text: str) -> str:
 
 
 def _print_llm_debug(resp: Dict[str, Any]) -> None:
-    if not _llm_debug_enabled():
-        return
-
     try:
         msg = ((resp or {}).get("choices") or [{}])[0].get("message") or {}
         content = msg.get("content")
@@ -86,14 +77,13 @@ def _print_llm_debug(resp: Dict[str, Any]) -> None:
 
 LLM_SYSTEM_PROMPT = """你是一个 MotionCanvas 的动作/参数编辑助手。
 
-你必须只输出一个 JSON 对象（不要输出 Markdown，不要输出代码块，不要输出多余文本）。
-
-优先使用 tools（函数调用）来表达修改意图：例如调用 camera.zoom_linear / bbox.translate 等工具。
+优先使用 tools（函数调用）来表达修改意图：例如调用 camera_set / camera_zoom_linear / bbox_translate 等工具。
 如果后端不支持 tools，你才退化为输出 JSON（包含 ops 或 updates）。
 
-当你输出 JSON 时，结构为：
+当你输出 JSON 时，必须只输出一个 JSON 对象（不要输出 Markdown，不要输出代码块，不要输出多余文本）。
+结构为：
 {
-  "assistant_message": "给用户的简短说明（可选）",
+  "assistant_message": "给用户的简短说明（必填）",
   "ops": [ ... 可选 ... ],
   "updates": { ... 可选 ... }
 }
@@ -951,10 +941,32 @@ def llm_apply_instruction(
     camera_kf_state,
 ):
     user_message = (user_message or "").strip()
-    if not user_message:
-        raise gr.Error("请输入你的要求")
 
     history = _normalize_chat_history(chat_history)
+    if not user_message:
+        # 不抛异常，避免输入框进入错误态导致无法继续操作
+        return (
+            history,
+            bbox_json_text,
+            point_json_text,
+            camera_json_text,
+            bbox_kf_state,
+            point_kf_state,
+            camera_kf_state,
+            prompt,
+            negative_prompt,
+            height,
+            width,
+            num_frames,
+            fps,
+            num_inference_steps,
+            cfg_scale,
+            sigma_shift,
+            seed,
+            gr.update(),
+            "请输入你的要求",
+            user_message,
+        )
 
     messages: List[Dict[str, Any]] = [{"role": "system", "content": LLM_SYSTEM_PROMPT}]
     messages.extend(_history_to_openai_messages(history))
@@ -1014,7 +1026,7 @@ def llm_apply_instruction(
             messages=messages,
             temperature=0.2,
             timeout=float(llm_timeout),
-            force_json=True,
+            force_json=False,  # tools 开启时不强制 JSON，有助于提高 tool_calls 命中率
             tools=tools,
             tool_choice="auto",
         )
@@ -1048,6 +1060,12 @@ def llm_apply_instruction(
         )
 
     tool_calls = _tool_calls_from_response(resp)
+
+    raw_content = ""
+    try:
+        raw_content = resp["choices"][0]["message"].get("content") or ""
+    except Exception:
+        raw_content = ""
 
     # New outputs
     new_bbox_json = bbox_json_text
@@ -1253,7 +1271,13 @@ def llm_apply_instruction(
             "",
         )
 
-    msg = assistant_msg or "✅ 已应用更新"
+    if assistant_msg is not None and str(assistant_msg).strip() != "":
+        msg = str(assistant_msg).strip()
+    else:
+        # 如果模型没提供 assistant_message，就把原始 content（截断+脱敏）展示出来，避免永远只有“✅ 已应用更新”
+        raw_s = _redact_data_urls(_truncate_for_log(raw_content, limit=800)).strip()
+        msg = raw_s if raw_s else "✅ 已应用更新"
+
     history.extend([
         {"role": "user", "content": user_message},
         {"role": "assistant", "content": msg},
