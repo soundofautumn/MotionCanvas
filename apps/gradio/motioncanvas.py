@@ -886,14 +886,14 @@ def generate_model_params_from_ui(
     camera_json_text,
     point_json_text,
 ):
-    if not bbox_json_text or not bbox_json_text.strip():
-        raise gr.Error("请先提供 Bbox JSON")
-
-    bbox_mask = build_bbox_mask_from_json_str(
-        bbox_json_text, int(num_frames), int(height), int(width)
-    )
-    bbox_mask_path = os.path.join(tempfile.gettempdir(), "motioncanvas_bbox_mask_ui.pt")
-    torch.save(bbox_mask, bbox_mask_path)
+    bbox_mask = None
+    bbox_mask_path = None
+    if bbox_json_text and bbox_json_text.strip():
+        bbox_mask = build_bbox_mask_from_json_str(
+            bbox_json_text, int(num_frames), int(height), int(width)
+        )
+        bbox_mask_path = os.path.join(tempfile.gettempdir(), "motioncanvas_bbox_mask_ui.pt")
+        torch.save(bbox_mask, bbox_mask_path)
 
     camera_params = build_camera_params_from_json(camera_json_text, int(num_frames))
     if camera_params is None:
@@ -938,9 +938,15 @@ def generate_model_params_from_ui(
     if track_video is not None:
         track_video_path = os.path.join(tempfile.gettempdir(), "motioncanvas_track_video_ui.pt")
         torch.save(track_video, track_video_path)
+
+    if bbox_mask_path and track_video_path:
         status = "✅ 已生成 bbox_mask 和 track_video"
-    else:
+    elif track_video_path and not bbox_mask_path:
+        status = "✅ 已生成 track_video（未提供 bbox）"
+    elif bbox_mask_path and not track_video_path:
         status = "⚠️ 已生成 bbox_mask，但 track_video 为空（缺少轨迹）"
+    else:
+        status = "⚠️ 未生成 bbox_mask/track_video（缺少轨迹）"
 
     return bbox_mask_path, track_video_path, status
 
@@ -1722,6 +1728,8 @@ with gr.Blocks(
                             label="2D 控制预览视频", interactive=False
                         )
 
+                    # ---- LLM 助手 Tab ----
+                    with gr.Tab("LLM 助手"):
                         gr.Markdown("### LLM 助手（DeepSeek / OpenAI 兼容）", elem_classes="section-title")
                         with gr.Accordion("对话与配置", open=True):
                             with gr.Row():
