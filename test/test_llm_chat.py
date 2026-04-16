@@ -4,7 +4,7 @@ import pytest
 
 
 def test_extract_json_object_direct():
-    from apps.gradio.motioncanvas import _extract_json_object
+    from apps.gradio.llm_assistant import _extract_json_object
 
     obj = _extract_json_object('{"a": 1, "b": [2, 3]}')
     assert obj["a"] == 1
@@ -12,7 +12,7 @@ def test_extract_json_object_direct():
 
 
 def test_extract_json_object_code_fence():
-    from apps.gradio.motioncanvas import _extract_json_object
+    from apps.gradio.llm_assistant import _extract_json_object
 
     text = """Here is json:
 ```json
@@ -25,7 +25,7 @@ def test_extract_json_object_code_fence():
 
 def test_openai_sdk_base_url_normalization_applied_in_helper(monkeypatch):
     """No network: replace OpenAI SDK with a fake and verify base_url gets '/v1'."""
-    from apps.gradio import motioncanvas as m
+    from apps.gradio import llm_assistant as m
 
     created = {}
 
@@ -69,7 +69,7 @@ def test_openai_sdk_base_url_normalization_applied_in_helper(monkeypatch):
 
 
 def test_llm_apply_instruction_applies_updates(monkeypatch):
-    from apps.gradio import motioncanvas as m
+    from apps.gradio import llm_assistant as m
 
     # Patch the completion call to avoid network and return a well-formed JSON response
     def _fake_complete(**kwargs):
@@ -152,7 +152,7 @@ def test_llm_apply_instruction_applies_updates(monkeypatch):
 
 
 def test_llm_apply_instruction_applies_ops(monkeypatch):
-    from apps.gradio import motioncanvas as m
+    from apps.gradio import llm_assistant as m
 
     # Base state: one bbox keyframe at frame 0
     bbox_state = {"0": [0.1, 0.1, 0.2, 0.2]}
@@ -230,8 +230,98 @@ def test_llm_apply_instruction_applies_ops(monkeypatch):
     assert isinstance(new_camera_state, dict)
 
 
+def test_llm_apply_instruction_applies_tool_calls(monkeypatch):
+    from apps.gradio import llm_assistant as m
+
+    captured = {}
+
+    def _fake_complete(**kwargs):
+        captured["tools"] = kwargs.get("tools")
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "tool_calls": [
+                            {
+                                "id": "call_1",
+                                "type": "function",
+                                "function": {
+                                    "name": "camera_zoom_linear",
+                                    "arguments": json.dumps(
+                                        {"start_frame": 0, "end_frame": 8, "start": 1.0, "end": 1.6},
+                                        ensure_ascii=False,
+                                    ),
+                                },
+                            },
+                            {
+                                "id": "call_2",
+                                "type": "function",
+                                "function": {
+                                    "name": "bbox_translate",
+                                    "arguments": json.dumps(
+                                        {"start_frame": 0, "end_frame": 8, "dx": 0.1, "dy": 0.0, "space": "norm"},
+                                        ensure_ascii=False,
+                                    ),
+                                },
+                            },
+                        ]
+                    }
+                }
+            ]
+        }
+
+    monkeypatch.setattr(m, "_openai_chat_complete", lambda **kw: _fake_complete(**kw))
+
+    bbox_state = {"0": [0.1, 0.1, 0.2, 0.2]}
+
+    out = m.llm_apply_instruction(
+        user_message="use tools",
+        chat_history=[],
+        llm_base_url="https://api.deepseek.com",
+        llm_api_key="",
+        llm_model="deepseek-chat",
+        llm_timeout=30,
+        input_image=None,
+        llm_send_image=False,
+        bbox_json_text=m._bbox_state_to_json(bbox_state),
+        camera_json_text="",
+        point_json_text="",
+        prompt="old",
+        negative_prompt="neg",
+        height=480,
+        width=832,
+        num_frames=9,
+        fps=15,
+        num_inference_steps=50,
+        cfg_scale=5.0,
+        sigma_shift=5.0,
+        seed=42,
+        motion_frame_idx=0,
+        bbox_kf_state=bbox_state,
+        point_kf_state={},
+        camera_kf_state={},
+    )
+
+    history = out[0]
+    new_bbox_state = out[4]
+    new_camera_json = out[3]
+
+    assert captured.get("tools")
+    assert history and str(history[-1][1]).startswith("✅")
+
+    # bbox translated by +0.1 on x
+    assert new_bbox_state["0"][0] == pytest.approx(0.2)
+    assert new_bbox_state["0"][2] == pytest.approx(0.3)
+
+    cam = json.loads(new_camera_json)
+    kfs = cam["camera"]["keyframes"]
+    frames = {int(k["frame"]): float(k["zoom"]) for k in kfs}
+    assert frames[0] == pytest.approx(1.0)
+    assert frames[8] == pytest.approx(1.6)
+
+
 def test_llm_apply_instruction_sends_image_when_enabled(monkeypatch):
-    from apps.gradio import motioncanvas as m
+    from apps.gradio import llm_assistant as m
     from PIL import Image
 
     captured = {}
