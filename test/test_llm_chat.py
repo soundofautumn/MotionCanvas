@@ -139,7 +139,7 @@ def test_llm_apply_instruction_applies_updates(monkeypatch):
         cleared_msg,
     ) = out
 
-    assert history and history[-1][1] == "applied"
+    assert history and history[-1]["role"] == "assistant" and history[-1]["content"] == "applied"
     assert new_prompt == "new prompt"
     assert "objects" in json.loads(new_bbox_json)
     assert new_bbox_state.get("0") == [0.1, 0.1, 0.2, 0.2]
@@ -211,7 +211,7 @@ def test_llm_apply_instruction_applies_ops(monkeypatch):
         *_rest,
     ) = out
 
-    assert history and history[-1][1] == "ops applied"
+    assert history and history[-1]["role"] == "assistant" and history[-1]["content"] == "ops applied"
 
     # bbox translated by +0.1 on x
     assert new_bbox_state["0"][0] == pytest.approx(0.2)
@@ -307,7 +307,7 @@ def test_llm_apply_instruction_applies_tool_calls(monkeypatch):
     new_camera_json = out[3]
 
     assert captured.get("tools")
-    assert history and str(history[-1][1]).startswith("✅")
+    assert history and history[-1]["role"] == "assistant" and str(history[-1]["content"]).startswith("✅")
 
     # bbox translated by +0.1 on x
     assert new_bbox_state["0"][0] == pytest.approx(0.2)

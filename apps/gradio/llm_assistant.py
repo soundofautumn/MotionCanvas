@@ -788,6 +788,82 @@ def _apply_tool_calls(
 # ==================== Public UI callback ====================
 
 
+def _chatbot_content_to_text(content: Any) -> str:
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+
+    # Gradio "messages" format: content can be a list of message parts, e.g.
+    # [{"type":"text","text":"hi"}] or [{"text":"hi","type":"text"}]
+    if isinstance(content, list):
+        parts: List[str] = []
+        for p in content:
+            if p is None:
+                continue
+            if isinstance(p, str):
+                parts.append(p)
+                continue
+            if isinstance(p, dict):
+                if "text" in p and p.get("text") is not None:
+                    parts.append(str(p.get("text")))
+                    continue
+                # best-effort
+                if p.get("type") == "text" and p.get("text") is not None:
+                    parts.append(str(p.get("text")))
+                    continue
+        if parts:
+            return "".join(parts)
+        return str(content)
+
+    if isinstance(content, dict):
+        if content.get("type") == "text" and content.get("text") is not None:
+            return str(content.get("text"))
+        if "text" in content and content.get("text") is not None:
+            return str(content.get("text"))
+
+    return str(content)
+
+
+def _normalize_chat_history(chat_history: Any) -> List[Dict[str, Any]]:
+    """Normalize gr.Chatbot history to a list of {role, content(str)} dicts.
+
+    - Gradio 6.x Chatbot uses "messages" format.
+    - For backward compatibility, also accepts legacy [(user, assistant), ...] tuples.
+    """
+
+    out: List[Dict[str, Any]] = []
+    for item in list(chat_history or []):
+        if isinstance(item, (list, tuple)) and len(item) == 2:
+            u, a = item
+            u_text = ("" if u is None else str(u))
+            a_text = ("" if a is None else str(a))
+            if u_text:
+                out.append({"role": "user", "content": u_text})
+            if a_text:
+                out.append({"role": "assistant", "content": a_text})
+            continue
+
+        if isinstance(item, dict) and "role" in item and "content" in item:
+            role = str(item.get("role") or "")
+            content = _chatbot_content_to_text(item.get("content"))
+            if role and content is not None:
+                out.append({"role": role, "content": content})
+            continue
+
+    return out
+
+
+def _history_to_openai_messages(history: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    msgs: List[Dict[str, Any]] = []
+    for m in history or []:
+        role = str(m.get("role") or "").strip()
+        if role not in {"user", "assistant"}:
+            continue
+        msgs.append({"role": role, "content": _chatbot_content_to_text(m.get("content"))})
+    return msgs
+
+
 def llm_apply_instruction(
     user_message,
     chat_history,
@@ -819,14 +895,10 @@ def llm_apply_instruction(
     if not user_message:
         raise gr.Error("请输入你的要求")
 
-    history = list(chat_history or [])
+    history = _normalize_chat_history(chat_history)
 
     messages: List[Dict[str, Any]] = [{"role": "system", "content": LLM_SYSTEM_PROMPT}]
-    for u, a in history:
-        if u:
-            messages.append({"role": "user", "content": str(u)})
-        if a:
-            messages.append({"role": "assistant", "content": str(a)})
+    messages.extend(_history_to_openai_messages(history))
 
     state_blob = {
         "prompt": prompt,
@@ -883,12 +955,15 @@ def llm_apply_instruction(
             messages=messages,
             temperature=0.2,
             timeout=float(llm_timeout),
-            force_json=False,  # tool calling responses may not be JSON
+            force_json=True,
             tools=tools,
             tool_choice="auto",
         )
     except Exception as e:
-        history.append((user_message, f"❌ LLM 调用失败：{e}"))
+        history.extend([
+            {"role": "user", "content": user_message},
+            {"role": "assistant", "content": f"❌ LLM 调用失败：{e}"},
+        ])
         return (
             history,
             bbox_json_text,
@@ -1091,7 +1166,10 @@ def llm_apply_instruction(
             new_camera_state = _camera_state_from_json_text(new_camera_json)
 
     except Exception as e:
-        history.append((user_message, f"❌ 解析/应用更新失败：{e}"))
+        history.extend([
+            {"role": "user", "content": user_message},
+            {"role": "assistant", "content": f"❌ 解析/应用更新失败：{e}"},
+        ])
         return (
             history,
             bbox_json_text,
@@ -1116,7 +1194,10 @@ def llm_apply_instruction(
         )
 
     msg = assistant_msg or "✅ 已应用更新"
-    history.append((user_message, msg))
+    history.extend([
+        {"role": "user", "content": user_message},
+        {"role": "assistant", "content": msg},
+    ])
 
     nf = int(new_num_frames)
     max_frame = max(0, nf - 1)
