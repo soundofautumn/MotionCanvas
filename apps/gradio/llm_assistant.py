@@ -16,11 +16,70 @@ import base64
 import io
 import json
 import math
+import os
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
 import gradio as gr
 from PIL import Image
+
+
+# ==================== Debug logging ====================
+
+
+def _llm_debug_enabled() -> bool:
+    v = (os.getenv("MOTIONCANVAS_LLM_DEBUG") or "").strip().lower()
+    return v in {"1", "true", "yes", "y", "on"}
+
+
+def _truncate_for_log(text: Any, limit: int = 2000) -> str:
+    s = "" if text is None else str(text)
+    if len(s) <= int(limit):
+        return s
+    return s[: int(limit)] + f"... (truncated, len={len(s)})"
+
+
+def _redact_data_urls(text: str) -> str:
+    # Avoid printing large base64 payloads (e.g., data:image/jpeg;base64,...)
+    if not text:
+        return text
+    return re.sub(r"data:image\/[^;]+;base64,[A-Za-z0-9+/=]+", "data:image/<redacted>;base64,<redacted>", text)
+
+
+def _print_llm_debug(resp: Dict[str, Any]) -> None:
+    if not _llm_debug_enabled():
+        return
+
+    try:
+        msg = ((resp or {}).get("choices") or [{}])[0].get("message") or {}
+        content = msg.get("content")
+        tool_calls = msg.get("tool_calls")
+
+        print("\n[MOTIONCANVAS][LLM] raw response")
+
+        if tool_calls:
+            print("[MOTIONCANVAS][LLM] tool_calls:")
+            try:
+                for tc in tool_calls:
+                    fn = (tc or {}).get("function") or {}
+                    name = fn.get("name")
+                    args = fn.get("arguments")
+                    args_s = _truncate_for_log(args, limit=800)
+                    args_s = _redact_data_urls(args_s)
+                    print(f"  - {name}: {args_s}")
+            except Exception:
+                print(_truncate_for_log(tool_calls, limit=2000))
+
+        if content is not None and str(content).strip() != "":
+            s = _truncate_for_log(content, limit=4000)
+            s = _redact_data_urls(s)
+            print("[MOTIONCANVAS][LLM] content:")
+            print(s)
+
+        print("[MOTIONCANVAS][LLM] end\n", flush=True)
+    except Exception:
+        # Never fail the UI due to logging
+        return
 
 
 # ==================== Prompts ====================
@@ -959,6 +1018,7 @@ def llm_apply_instruction(
             tools=tools,
             tool_choice="auto",
         )
+        _print_llm_debug(resp)
     except Exception as e:
         history.extend([
             {"role": "user", "content": user_message},
