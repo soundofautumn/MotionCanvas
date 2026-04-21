@@ -23,6 +23,147 @@ import gradio as gr
 from PIL import Image
 
 
+# ==================== Optional YOLO (ultralytics) ====================
+
+
+_YOLO_MODEL = None
+
+
+def _normalize_class_name(name: Any) -> str:
+    s = ("" if name is None else str(name)).strip().lower()
+    if not s:
+        return ""
+
+    # Minimal zh->en mapping for common COCO-ish classes.
+    zh_map = {
+        "人": "person",
+        "人物": "person",
+        "行人": "person",
+        "汽车": "car",
+        "车": "car",
+        "小汽车": "car",
+        "公交车": "bus",
+        "大巴": "bus",
+        "卡车": "truck",
+        "货车": "truck",
+        "摩托车": "motorcycle",
+        "自行车": "bicycle",
+        "狗": "dog",
+        "猫": "cat",
+        "鸟": "bird",
+        "马": "horse",
+        "羊": "sheep",
+        "牛": "cow",
+        "椅子": "chair",
+        "沙发": "couch",
+        "杯子": "cup",
+        "手机": "cell phone",
+        "笔记本": "laptop",
+    }
+    return zh_map.get(s, s)
+
+
+def _get_yolo_model():
+    """Lazily load a YOLO model (ultralytics).
+
+    Uses env var MOTIONCANVAS_YOLO_WEIGHTS if provided, otherwise defaults to
+    a common pretrained weight name (ultralytics will download if missing).
+    """
+
+    global _YOLO_MODEL
+    if _YOLO_MODEL is not None:
+        return _YOLO_MODEL
+
+    try:
+        from ultralytics import YOLO  # type: ignore
+    except Exception as e:
+        raise RuntimeError(
+            "未安装 ultralytics（YOLO）。请先在当前环境安装：pip install ultralytics\n"
+            "或者在仓库根目录的 venv 中运行：/home/qjming/MotionCanvas/.venv/bin/pip install ultralytics"
+        ) from e
+
+    import os
+
+    weights = (os.environ.get("MOTIONCANVAS_YOLO_WEIGHTS") or "yolov8n.pt").strip()
+    _YOLO_MODEL = YOLO(weights)
+    return _YOLO_MODEL
+
+
+def _to_norm_xyxy(x1: float, y1: float, x2: float, y2: float, w: int, h: int) -> List[float]:
+    w = max(1, int(w))
+    h = max(1, int(h))
+    x1n = _clamp01(float(x1) / float(w))
+    y1n = _clamp01(float(y1) / float(h))
+    x2n = _clamp01(float(x2) / float(w))
+    y2n = _clamp01(float(y2) / float(h))
+    if x2n <= x1n:
+        x2n = _clamp01(x1n + 1e-4)
+    if y2n <= y1n:
+        y2n = _clamp01(y1n + 1e-4)
+    return [round(x1n, 4), round(y1n, 4), round(x2n, 4), round(y2n, 4)]
+
+
+def _yolo_best_box(
+    image: Image.Image,
+    *,
+    class_name: str = "",
+    min_conf: float = 0.25,
+) -> Optional[Dict[str, Any]]:
+    """Return best detection box for a given class (or best overall).
+
+    Output: {"label": str, "conf": float, "xyxy": [x1,y1,x2,y2]}
+    All xyxy in pixel coordinates of the provided PIL image.
+    """
+
+    if image is None:
+        return None
+
+    model = _get_yolo_model()
+    img = image.convert("RGB")
+
+    # ultralytics returns a list[Results]
+    results = model.predict(img, verbose=False)
+    if not results:
+        return None
+    r0 = results[0]
+
+    boxes = getattr(r0, "boxes", None)
+    if boxes is None:
+        return None
+
+    names = getattr(r0, "names", {}) or {}
+
+    target = _normalize_class_name(class_name)
+    best = None
+    best_conf = -1.0
+    try:
+        xyxy = boxes.xyxy
+        conf = boxes.conf
+        cls = boxes.cls
+    except Exception:
+        return None
+
+    n = int(getattr(boxes, "shape", [len(xyxy)])[0] if hasattr(boxes, "shape") else len(xyxy))
+    for i in range(n):
+        try:
+            c = float(conf[i])
+            if c < float(min_conf):
+                continue
+            cls_id = int(cls[i])
+            label = str(names.get(cls_id, cls_id))
+            if target and _normalize_class_name(label) != target:
+                continue
+            x1, y1, x2, y2 = [float(v) for v in xyxy[i].tolist()]
+        except Exception:
+            continue
+
+        if c > best_conf:
+            best_conf = c
+            best = {"label": label, "conf": c, "xyxy": [x1, y1, x2, y2]}
+
+    return best
+
+
 # ==================== Debug logging ====================
 
 
@@ -764,6 +905,40 @@ def get_motion_tools() -> List[Dict[str, Any]]:
                 },
             },
         },
+
+        # --- Localization tools (YOLO) ---
+        {
+            "type": "function",
+            "function": {
+                "name": "yolo_detect_bbox",
+                "description": "Detect an object bbox on the input image using YOLO (ultralytics) and write it into bbox_json for a target frame.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "frame": {"type": "integer", "description": "Target frame index. If omitted, use current_frame_idx."},
+                        "class_name": {"type": "string", "description": "Target class name (e.g., person, car). Chinese aliases like '人','汽车' may work for common classes."},
+                        "min_conf": {"type": "number", "description": "Min confidence threshold, default 0.25."},
+                    },
+                    "required": [],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "yolo_detect_point",
+                "description": "Detect an object bbox on the input image using YOLO and write the bbox center as a point into point_json for a target frame.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "frame": {"type": "integer", "description": "Target frame index. If omitted, use current_frame_idx."},
+                        "class_name": {"type": "string", "description": "Target class name (e.g., person, car)."},
+                        "min_conf": {"type": "number", "description": "Min confidence threshold, default 0.25."},
+                    },
+                    "required": [],
+                },
+            },
+        },
     ]
 
 
@@ -779,6 +954,8 @@ def _tool_calls_from_response(resp: Dict[str, Any]) -> List[Dict[str, Any]]:
 def _apply_tool_calls(
     tool_calls: List[Dict[str, Any]],
     *,
+    input_image: Optional[Image.Image],
+    current_frame_idx: int,
     bbox_state: Dict[str, Any],
     point_state: Dict[str, Any],
     camera_state: Dict[str, Any],
@@ -793,6 +970,14 @@ def _apply_tool_calls(
     gen_params: Dict[str, Any],
 ) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any], str, str, Dict[str, Any], List[str]]:
     msgs: List[str] = []
+
+    def _cap_frame_local(v, default_v=0):
+        try:
+            vv = int(v)
+        except Exception:
+            vv = int(default_v)
+        nf = int(num_frames)
+        return max(0, min(max(0, nf - 1), vv))
 
     for call in tool_calls:
         fn = (call.get("function") or {})
@@ -859,6 +1044,34 @@ def _apply_tool_calls(
                     if k in args and args.get(k) is not None:
                         gen_params[k] = args.get(k)
             msgs.append("set_generation_params")
+        elif name in {"yolo_detect_bbox", "yolo_detect_point"}:
+            if input_image is None:
+                raise gr.Error("未提供 input_image，无法执行 YOLO 定位（请上传起始帧图像）")
+
+            f = _cap_frame_local(args.get("frame", None), default_v=int(current_frame_idx))
+            class_name = str(args.get("class_name") or "").strip()
+            min_conf = float(args.get("min_conf", 0.25) or 0.25)
+
+            det = _yolo_best_box(input_image, class_name=class_name, min_conf=min_conf)
+            if not det:
+                # Keep as soft failure (no state change) but reflect in assistant message.
+                label_dbg = class_name if class_name else "<any>"
+                msgs.append(f"{name}:not_found({label_dbg})")
+                continue
+
+            img_w, img_h = input_image.size
+            x1, y1, x2, y2 = det["xyxy"]
+            bbox_norm = _to_norm_xyxy(x1, y1, x2, y2, img_w, img_h)
+
+            fi = str(int(f))
+            if name == "yolo_detect_bbox":
+                bbox_state[fi] = bbox_norm
+                msgs.append(f"yolo_detect_bbox({det.get('label')},conf={float(det.get('conf',0)):.2f},frame={f})")
+            else:
+                cx = (bbox_norm[0] + bbox_norm[2]) / 2.0
+                cy = (bbox_norm[1] + bbox_norm[3]) / 2.0
+                point_state[fi] = [[round(_clamp01(cx), 4), round(_clamp01(cy), 4)]]
+                msgs.append(f"yolo_detect_point({det.get('label')},conf={float(det.get('conf',0)):.2f},frame={f})")
         else:
             msgs.append(f"unknown_tool:{name}")
 
@@ -1137,6 +1350,8 @@ def llm_apply_instruction(
                 tool_names,
             ) = _apply_tool_calls(
                 tool_calls,
+                input_image=input_image,
+                current_frame_idx=int(motion_frame_idx),
                 bbox_state=base_bbox_state,
                 point_state=base_point_state,
                 camera_state=base_camera_state,
