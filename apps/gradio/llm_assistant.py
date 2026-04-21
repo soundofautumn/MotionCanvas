@@ -256,6 +256,10 @@ LLM_SYSTEM_PROMPT = """你是 MotionCanvas 的“镜头/物体运动控制 + 生
 - 后续如果你仍然需要查看图像，请通过 tools 主动调用 get_input_image 获取压缩后的图像 data_url。
 - 对于“获取物体 bbox/点位”的需求，优先调用 yolo_detect_bbox / yolo_detect_point（服务端会直接在 input_image 上执行，不必把整张图发回模型）。
 
+当你需要用户确认/澄清信息时：
+- 直接调用 ask_user 提出问题（可以给出 choices）。
+- 在得到用户答复前，不要擅自猜测，也不要继续调用会修改状态的 tools。
+
 当你输出 JSON 时：
 - 必须只输出一个 JSON 对象（不要输出 Markdown，不要输出代码块，不要输出多余文本）。
 - 结构为：
@@ -1187,6 +1191,28 @@ def get_motion_tools() -> List[Dict[str, Any]]:
             },
         },
 
+        # --- Ask user for confirmation ---
+        {
+            "type": "function",
+            "function": {
+                "name": "ask_user",
+                "description": "Ask the user a clarification/confirmation question and stop. Use when requirements are ambiguous and you must confirm before editing states.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "question": {"type": "string", "description": "The question to ask the user (Chinese preferred)."},
+                        "choices": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Optional choices the user can pick from.",
+                        },
+                        "allow_freeform": {"type": "boolean", "description": "Whether user can answer freely. Default true."},
+                    },
+                    "required": ["question"],
+                },
+            },
+        },
+
         # --- On-demand image access ---
         {
             "type": "function",
@@ -1267,9 +1293,20 @@ def _apply_tool_calls(
     prompt: str,
     negative_prompt: str,
     gen_params: Dict[str, Any],
-) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any], str, str, Dict[str, Any], List[str], List[Dict[str, Any]]]:
+) -> Tuple[
+    Dict[str, Any],
+    Dict[str, Any],
+    Dict[str, Any],
+    str,
+    str,
+    Dict[str, Any],
+    List[str],
+    List[Dict[str, Any]],
+    Optional[Dict[str, Any]],
+]:
     msgs: List[str] = []
     tool_results: List[Dict[str, Any]] = []
+    ask_payload: Optional[Dict[str, Any]] = None
 
     def _cap_frame_local(v, default_v=0):
         try:
@@ -1278,6 +1315,66 @@ def _apply_tool_calls(
             vv = int(default_v)
         nf = int(num_frames)
         return max(0, min(max(0, nf - 1), vv))
+
+    def _add_result_for(call_id: Any, tool_name: str, payload: Any):
+        tool_results.append(
+            {
+                "tool_call_id": str(call_id or ""),
+                "name": str(tool_name or ""),
+                "content": json.dumps(payload, ensure_ascii=False),
+            }
+        )
+
+    # If the model asks the user a question, we short-circuit: do not apply other tools.
+    # This prevents accidental state edits before the user confirms.
+    ask_call = None
+    for c in (tool_calls or []):
+        fn0 = (c.get("function") or {})
+        nm0 = str(fn0.get("name") or "").strip()
+        if nm0 == "ask_user":
+            ask_call = c
+            break
+
+    if ask_call is not None:
+        fn = (ask_call.get("function") or {})
+        call_id = ask_call.get("id") or ""
+        args_raw = fn.get("arguments")
+        try:
+            args = json.loads(args_raw) if isinstance(args_raw, str) else (args_raw or {})
+        except Exception:
+            args = {}
+        question = str((args or {}).get("question") or "").strip()
+        choices = (args or {}).get("choices")
+        allow_freeform = (args or {}).get("allow_freeform")
+        if allow_freeform is None:
+            allow_freeform = True
+        if not question:
+            question = "请确认：你希望我如何继续？"
+        if not isinstance(choices, list):
+            choices = None
+        else:
+            choices = [str(x) for x in choices if str(x).strip() != ""]
+            if not choices:
+                choices = None
+        ask_payload = {
+            "type": "ask",
+            "question": question,
+            "choices": choices,
+            "allow_freeform": bool(allow_freeform),
+        }
+        msgs.append("ask_user")
+        _add_result_for(call_id, "ask_user", {"ok": True, **ask_payload})
+        return (
+            bbox_state,
+            point_state,
+            camera_state,
+            prompt,
+            negative_prompt,
+            gen_params,
+            msgs,
+            tool_results,
+            ask_payload,
+        )
 
     for call in tool_calls:
         fn = (call.get("function") or {})
@@ -1288,15 +1385,6 @@ def _apply_tool_calls(
             args = json.loads(args_raw) if isinstance(args_raw, str) else (args_raw or {})
         except Exception:
             args = {}
-
-        def _add_result(payload: Any):
-            tool_results.append(
-                {
-                    "tool_call_id": str(call_id),
-                    "name": name,
-                    "content": json.dumps(payload, ensure_ascii=False),
-                }
-            )
 
         if name == "camera_set":
             op = {
@@ -1310,56 +1398,56 @@ def _apply_tool_calls(
                 [op], bbox_state, point_state, camera_state, num_frames, width, height, bbox_json_text=bbox_json_text, point_json_text=point_json_text, camera_json_text=camera_json_text
             )
             msgs.append("camera_set")
-            _add_result({"ok": True, "applied": "camera_set"})
+            _add_result_for(call_id, name, {"ok": True, "applied": "camera_set"})
         elif name == "camera_zoom_linear":
             op = {"op": "camera.zoom_linear", **args}
             bbox_state, point_state, camera_state = apply_ops_to_states(
                 [op], bbox_state, point_state, camera_state, num_frames, width, height, bbox_json_text=bbox_json_text, point_json_text=point_json_text, camera_json_text=camera_json_text
             )
             msgs.append("camera_zoom_linear")
-            _add_result({"ok": True, "applied": "camera_zoom_linear"})
+            _add_result_for(call_id, name, {"ok": True, "applied": "camera_zoom_linear"})
         elif name == "camera_pan_linear":
             op = {"op": "camera.pan_linear", **args}
             bbox_state, point_state, camera_state = apply_ops_to_states(
                 [op], bbox_state, point_state, camera_state, num_frames, width, height, bbox_json_text=bbox_json_text, point_json_text=point_json_text, camera_json_text=camera_json_text
             )
             msgs.append("camera_pan_linear")
-            _add_result({"ok": True, "applied": "camera_pan_linear"})
+            _add_result_for(call_id, name, {"ok": True, "applied": "camera_pan_linear"})
         elif name == "camera_rotation_linear":
             op = {"op": "camera.rotation_linear", **args}
             bbox_state, point_state, camera_state = apply_ops_to_states(
                 [op], bbox_state, point_state, camera_state, num_frames, width, height, bbox_json_text=bbox_json_text, point_json_text=point_json_text, camera_json_text=camera_json_text
             )
             msgs.append("camera_rotation_linear")
-            _add_result({"ok": True, "applied": "camera_rotation_linear"})
+            _add_result_for(call_id, name, {"ok": True, "applied": "camera_rotation_linear"})
         elif name == "bbox_translate":
             op = {"op": "bbox.translate", **args}
             bbox_state, point_state, camera_state = apply_ops_to_states(
                 [op], bbox_state, point_state, camera_state, num_frames, width, height, bbox_json_text=bbox_json_text, point_json_text=point_json_text, camera_json_text=camera_json_text
             )
             msgs.append("bbox_translate")
-            _add_result({"ok": True, "applied": "bbox_translate"})
+            _add_result_for(call_id, name, {"ok": True, "applied": "bbox_translate"})
         elif name == "bbox_set":
             op = {"op": "bbox.set", "frame": args.get("frame", 0), "bbox": args.get("bbox"), "space": args.get("space", "norm")}
             bbox_state, point_state, camera_state = apply_ops_to_states(
                 [op], bbox_state, point_state, camera_state, num_frames, width, height, bbox_json_text=bbox_json_text, point_json_text=point_json_text, camera_json_text=camera_json_text
             )
             msgs.append("bbox_set")
-            _add_result({"ok": True, "applied": "bbox_set"})
+            _add_result_for(call_id, name, {"ok": True, "applied": "bbox_set"})
         elif name == "points_translate":
             op = {"op": "points.translate", **args}
             bbox_state, point_state, camera_state = apply_ops_to_states(
                 [op], bbox_state, point_state, camera_state, num_frames, width, height, bbox_json_text=bbox_json_text, point_json_text=point_json_text, camera_json_text=camera_json_text
             )
             msgs.append("points_translate")
-            _add_result({"ok": True, "applied": "points_translate"})
+            _add_result_for(call_id, name, {"ok": True, "applied": "points_translate"})
         elif name == "points_set":
             op = {"op": "points.set", "frame": args.get("frame", 0), "points": args.get("points"), "space": args.get("space", "norm")}
             bbox_state, point_state, camera_state = apply_ops_to_states(
                 [op], bbox_state, point_state, camera_state, num_frames, width, height, bbox_json_text=bbox_json_text, point_json_text=point_json_text, camera_json_text=camera_json_text
             )
             msgs.append("points_set")
-            _add_result({"ok": True, "applied": "points_set"})
+            _add_result_for(call_id, name, {"ok": True, "applied": "points_set"})
         elif name == "set_generation_params":
             # Only update fields that exist
             if isinstance(args, dict):
@@ -1374,7 +1462,7 @@ def _apply_tool_calls(
                     if k in args and args.get(k) is not None:
                         gen_params[k] = args.get(k)
             msgs.append("set_generation_params")
-            _add_result({"ok": True, "applied": "set_generation_params"})
+            _add_result_for(call_id, name, {"ok": True, "applied": "set_generation_params"})
         elif name == "get_input_image":
             if input_image is None:
                 raise gr.Error("未提供 input_image，无法获取起始帧图像（请上传起始帧图像）")
@@ -1391,7 +1479,7 @@ def _apply_tool_calls(
             )
             w, h = input_image.size
             msgs.append(f"get_input_image(max_side={max_side})")
-            _add_result({"ok": True, "width": int(w), "height": int(h), "data_url": data_url})
+            _add_result_for(call_id, name, {"ok": True, "width": int(w), "height": int(h), "data_url": data_url})
         elif name in {"yolo_detect_bbox", "yolo_detect_point"}:
             if input_image is None:
                 raise gr.Error("未提供 input_image，无法执行 YOLO 定位（请上传起始帧图像）")
@@ -1405,7 +1493,7 @@ def _apply_tool_calls(
                 # Keep as soft failure (no state change) but reflect in assistant message.
                 label_dbg = class_name if class_name else "<any>"
                 msgs.append(f"{name}:not_found({label_dbg})")
-                _add_result({"ok": True, "found": False, "class_name": class_name, "min_conf": min_conf})
+                _add_result_for(call_id, name, {"ok": True, "found": False, "class_name": class_name, "min_conf": min_conf})
                 continue
 
             img_w, img_h = input_image.size
@@ -1416,18 +1504,18 @@ def _apply_tool_calls(
             if name == "yolo_detect_bbox":
                 bbox_state[fi] = bbox_norm
                 msgs.append(f"yolo_detect_bbox({det.get('label')},conf={float(det.get('conf',0)):.2f},frame={f})")
-                _add_result({"ok": True, "found": True, "frame": int(f), "label": det.get("label"), "conf": float(det.get("conf", 0.0)), "bbox_norm": bbox_norm})
+                _add_result_for(call_id, name, {"ok": True, "found": True, "frame": int(f), "label": det.get("label"), "conf": float(det.get("conf", 0.0)), "bbox_norm": bbox_norm})
             else:
                 cx = (bbox_norm[0] + bbox_norm[2]) / 2.0
                 cy = (bbox_norm[1] + bbox_norm[3]) / 2.0
                 point_state[fi] = [[round(_clamp01(cx), 4), round(_clamp01(cy), 4)]]
                 msgs.append(f"yolo_detect_point({det.get('label')},conf={float(det.get('conf',0)):.2f},frame={f})")
-                _add_result({"ok": True, "found": True, "frame": int(f), "label": det.get("label"), "conf": float(det.get("conf", 0.0)), "point_norm": point_state[fi][0], "bbox_norm": bbox_norm})
+                _add_result_for(call_id, name, {"ok": True, "found": True, "frame": int(f), "label": det.get("label"), "conf": float(det.get("conf", 0.0)), "point_norm": point_state[fi][0], "bbox_norm": bbox_norm})
         else:
             msgs.append(f"unknown_tool:{name}")
-            _add_result({"ok": False, "error": f"unknown_tool:{name}"})
+            _add_result_for(call_id, name, {"ok": False, "error": f"unknown_tool:{name}"})
 
-    return bbox_state, point_state, camera_state, prompt, negative_prompt, gen_params, msgs, tool_results
+    return bbox_state, point_state, camera_state, prompt, negative_prompt, gen_params, msgs, tool_results, ask_payload
 
 
 # ==================== Public UI callback ====================
@@ -1716,6 +1804,7 @@ def llm_apply_instruction(
             gen_params,
             tool_names,
             tool_results,
+            ask_payload,
         ) = _apply_tool_calls(
             tool_calls,
             input_image=input_image,
@@ -1734,6 +1823,46 @@ def llm_apply_instruction(
             gen_params=gen_params,
         )
         tool_names_all.extend(tool_names)
+
+        if ask_payload is not None:
+            q = str(ask_payload.get("question") or "").strip()
+            choices = ask_payload.get("choices")
+            allow_freeform = bool(ask_payload.get("allow_freeform", True))
+
+            parts = ["需要你确认一个问题：", q]
+            if isinstance(choices, list) and choices:
+                parts.append("可选项：" + " / ".join([str(x) for x in choices]))
+            if allow_freeform:
+                parts.append("请直接回复你的选择或补充说明。")
+            msg = "\n".join([p for p in parts if p and str(p).strip() != ""]) or "请确认：你希望我如何继续？"
+
+            history.extend([
+                {"role": "user", "content": user_message},
+                {"role": "assistant", "content": msg},
+            ])
+            return (
+                history,
+                bbox_json_text,
+                point_json_text,
+                camera_json_text,
+                bbox_kf_state,
+                point_kf_state,
+                camera_kf_state,
+                prompt,
+                negative_prompt,
+                height,
+                width,
+                num_frames,
+                fps,
+                num_inference_steps,
+                cfg_scale,
+                sigma_shift,
+                seed,
+                gr.update(),
+                send_image_checkbox_update,
+                "需要用户确认",
+                "",
+            )
 
         # Apply param updates (snap/clip) after each tool round
         if "height" in gen_params:
