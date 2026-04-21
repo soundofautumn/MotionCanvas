@@ -258,9 +258,9 @@ LLM_SYSTEM_PROMPT = """你是 MotionCanvas 的“镜头/物体运动控制 + 生
 ops 语义（可选，用于增量编辑）：
 - camera.set / camera.zoom_linear / camera.pan_linear / camera.rotation_linear
 - bbox.set（精确设置某一帧 bbox；bbox=[x1,y1,x2,y2]，space=norm/px，px 会换算到 norm）
-- bbox.translate（dx/dy 可用 norm 或 px；px 时会按 width/height 自动换算到 norm）
+- bbox.translate（dx/dy 可用 norm 或 px；px 时会按 width/height 自动换算到 norm；可选 transition=step/linear，linear 用于平滑过渡并在 end_frame 后保持最终位移）
 - points.set（精确设置某一帧的点列表；points=[[x,y],...]，space=norm/px，px 会换算到 norm）
-- points.translate（dx/dy 可用 norm 或 px；px 时会按 width/height 自动换算到 norm）
+- points.translate（dx/dy 可用 norm 或 px；px 时会按 width/height 自动换算到 norm；可选 transition=step/linear，linear 用于平滑过渡并在 end_frame 后保持最终位移）
 
 updates 语义（可选，用于直接覆盖字段）：
 - updates.bbox_json / updates.camera_json / updates.point_json 可以直接给完整 JSON 字符串或对象。
@@ -587,6 +587,82 @@ def _interp_bbox_norm_for_frame(frames: Dict[str, Any], frame_idx: int):
     return None
 
 
+def _interp_points_norm_for_frame(point_state: Dict[str, Any], frame_idx: int) -> Optional[List[List[float]]]:
+    """Interpolate point tracks at a given frame.
+
+    point_state format: {"frame_idx": [[x,y], [x,y], ...], ...}
+    Tracks are implied by list index.
+
+    Returns a list of points (len=max_tracks) in norm coords, or None if no tracks exist.
+    """
+
+    items: List[Tuple[int, List[Any]]] = []
+    max_tracks = 0
+    for fi_str, pts in (point_state or {}).items():
+        try:
+            fi = int(fi_str)
+        except Exception:
+            continue
+        if not isinstance(pts, list) or not pts:
+            continue
+        items.append((fi, pts))
+        max_tracks = max(max_tracks, len(pts))
+
+    if not items or max_tracks <= 0:
+        return None
+
+    items = sorted(items, key=lambda x: x[0])
+
+    def _safe_xy(v: Any) -> Optional[Tuple[float, float]]:
+        if not isinstance(v, (list, tuple)) or len(v) < 2:
+            return None
+        try:
+            return float(v[0]), float(v[1])
+        except Exception:
+            return None
+
+    out: List[List[float]] = []
+    for track_idx in range(max_tracks):
+        series: List[Tuple[int, float, float]] = []
+        for fi, pts in items:
+            if track_idx >= len(pts):
+                continue
+            xy = _safe_xy(pts[track_idx])
+            if xy is None:
+                continue
+            x, y = xy
+            series.append((fi, x, y))
+
+        if not series:
+            # No data for this index anywhere; default to (0,0) to keep shape stable.
+            out.append([0.0, 0.0])
+            continue
+
+        series = sorted(series, key=lambda t: t[0])
+        if frame_idx <= series[0][0]:
+            _, x, y = series[0]
+            out.append([x, y])
+            continue
+        if frame_idx >= series[-1][0]:
+            _, x, y = series[-1]
+            out.append([x, y])
+            continue
+
+        for j in range(len(series) - 1):
+            f0, x0, y0 = series[j]
+            f1, x1, y1 = series[j + 1]
+            if f0 <= frame_idx <= f1:
+                span = max(1, f1 - f0)
+                t = (frame_idx - f0) / span
+                out.append([_lerp(x0, x1, t), _lerp(y0, y1, t)])
+                break
+        else:
+            _, x, y = series[-1]
+            out.append([x, y])
+
+    return out
+
+
 def apply_ops_to_states(
     ops: Any,
     bbox_state: Dict[str, Any],
@@ -739,6 +815,7 @@ def apply_ops_to_states(
 
         if op == "bbox.translate":
             space = str(item.get("space", "norm")).strip().lower()
+            transition = str(item.get("transition", "step")).strip().lower()
             dx = float(item.get("dx", 0.0))
             dy = float(item.get("dy", 0.0))
             if space in {"px", "pixel", "pixels"}:
@@ -749,6 +826,64 @@ def apply_ops_to_states(
             ef = _cap_frame(item.get("end_frame", nf - 1), nf - 1)
             if ef < sf:
                 sf, ef = ef, sf
+
+            # Smooth transition: ramp from 0 at start_frame to full dx/dy at end_frame,
+            # and keep full shift after end_frame (so no discontinuity at end).
+            if transition in {"linear", "smooth", "ramp"}:
+                orig_bbox_state = dict(bbox_state or {})
+                existing_frames = {str(int(k)) for k in orig_bbox_state.keys()}
+                span = max(1, ef - sf)
+
+                sfi = str(int(sf))
+                efi = str(int(ef))
+
+                start_bbox = _interp_bbox_norm_for_frame(orig_bbox_state, sf)
+                end_bbox = _interp_bbox_norm_for_frame(orig_bbox_state, ef)
+                if start_bbox is None or end_bbox is None:
+                    continue
+
+                if sfi not in existing_frames:
+                    bbox_state[sfi] = [round(float(start_bbox[0]), 4), round(float(start_bbox[1]), 4), round(float(start_bbox[2]), 4), round(float(start_bbox[3]), 4)]
+                if efi not in existing_frames:
+                    # end frame should be fully shifted
+                    bx = list(end_bbox)
+                    x1, y1, x2, y2 = [float(x) for x in bx]
+                    x1, x2 = _clamp01(x1 + dx), _clamp01(x2 + dx)
+                    y1, y2 = _clamp01(y1 + dy), _clamp01(y2 + dy)
+                    if x2 <= x1:
+                        x2 = _clamp01(x1 + 1e-4)
+                    if y2 <= y1:
+                        y2 = _clamp01(y1 + 1e-4)
+                    bbox_state[efi] = [round(x1, 4), round(y1, 4), round(x2, 4), round(y2, 4)]
+
+                def _factor(fi: int) -> float:
+                    if fi < sf:
+                        return 0.0
+                    if fi >= ef:
+                        return 1.0
+                    return (fi - sf) / float(span)
+
+                def _shift(bb, t: float):
+                    x1, y1, x2, y2 = [float(x) for x in bb]
+                    x1, x2 = _clamp01(x1 + dx * t), _clamp01(x2 + dx * t)
+                    y1, y2 = _clamp01(y1 + dy * t), _clamp01(y2 + dy * t)
+                    if x2 <= x1:
+                        x2 = _clamp01(x1 + 1e-4)
+                    if y2 <= y1:
+                        y2 = _clamp01(y1 + 1e-4)
+                    return [round(x1, 4), round(y1, 4), round(x2, 4), round(y2, 4)]
+
+                # Shift all existing keyframes with time-dependent factor
+                for fi_str, bb in list(bbox_state.items()):
+                    try:
+                        fi = int(fi_str)
+                    except Exception:
+                        continue
+                    t = _factor(fi)
+                    if t <= 0.0:
+                        continue
+                    bbox_state[fi_str] = _shift(bb, t)
+                continue
 
             orig_bbox_state = dict(bbox_state or {})
             existing_frames = {str(int(k)) for k in orig_bbox_state.keys()}
@@ -785,6 +920,7 @@ def apply_ops_to_states(
 
         if op == "points.translate":
             space = str(item.get("space", "norm")).strip().lower()
+            transition = str(item.get("transition", "step")).strip().lower()
             dx = float(item.get("dx", 0.0))
             dy = float(item.get("dy", 0.0))
             if space in {"px", "pixel", "pixels"}:
@@ -795,6 +931,50 @@ def apply_ops_to_states(
             ef = _cap_frame(item.get("end_frame", nf - 1), nf - 1)
             if ef < sf:
                 sf, ef = ef, sf
+
+            if transition in {"linear", "smooth", "ramp"}:
+                span = max(1, ef - sf)
+
+                def _factor(fi: int) -> float:
+                    if fi < sf:
+                        return 0.0
+                    if fi >= ef:
+                        return 1.0
+                    return (fi - sf) / float(span)
+
+                existing_frames = {str(int(k)) for k in (point_state or {}).keys()}
+                sfi = str(int(sf))
+                efi = str(int(ef))
+                base_start = _interp_points_norm_for_frame(point_state, sf)
+                base_end = _interp_points_norm_for_frame(point_state, ef)
+
+                if base_start is not None and sfi not in existing_frames:
+                    point_state[sfi] = [[round(_clamp01(float(xy[0])), 4), round(_clamp01(float(xy[1])), 4)] for xy in base_start]
+                if base_end is not None and efi not in existing_frames:
+                    shifted_end = []
+                    for xy in base_end:
+                        x, y = float(xy[0]), float(xy[1])
+                        shifted_end.append([round(_clamp01(x + dx), 4), round(_clamp01(y + dy), 4)])
+                    point_state[efi] = shifted_end
+
+                for fi_str, pts in list(point_state.items()):
+                    try:
+                        fi = int(fi_str)
+                    except Exception:
+                        continue
+                    t = _factor(fi)
+                    if t <= 0.0:
+                        continue
+                    if not isinstance(pts, list):
+                        continue
+                    new_pts = []
+                    for xy in pts:
+                        if not isinstance(xy, (list, tuple)) or len(xy) < 2:
+                            continue
+                        x, y = float(xy[0]), float(xy[1])
+                        new_pts.append([round(_clamp01(x + dx * t), 4), round(_clamp01(y + dy * t), 4)])
+                    point_state[fi_str] = new_pts
+                continue
 
             for fi_str, pts in list(point_state.items()):
                 try:
@@ -904,6 +1084,11 @@ def get_motion_tools() -> List[Dict[str, Any]]:
                         "dx": {"type": "number"},
                         "dy": {"type": "number"},
                         "space": {"type": "string", "enum": ["norm", "px"]},
+                        "transition": {
+                            "type": "string",
+                            "enum": ["step", "linear"],
+                            "description": "step: apply constant translation inside the range (legacy). linear: ramp from 0 at start_frame to full dx/dy at end_frame, and hold after end_frame.",
+                        },
                     },
                     "required": ["start_frame", "end_frame", "dx", "dy"],
                 },
@@ -938,6 +1123,11 @@ def get_motion_tools() -> List[Dict[str, Any]]:
                         "dx": {"type": "number"},
                         "dy": {"type": "number"},
                         "space": {"type": "string", "enum": ["norm", "px"]},
+                        "transition": {
+                            "type": "string",
+                            "enum": ["step", "linear"],
+                            "description": "step: apply constant translation inside the range (legacy). linear: ramp from 0 at start_frame to full dx/dy at end_frame, and hold after end_frame.",
+                        },
                     },
                     "required": ["start_frame", "end_frame", "dx", "dy"],
                 },
