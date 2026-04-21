@@ -246,6 +246,10 @@ LLM_SYSTEM_PROMPT = """你是 MotionCanvas 的“镜头/物体运动控制 + 生
     - 生成参数：set_generation_params
 2) 如果后端不支持 tools，或你需要一次性写入完整 JSON（例如直接给出 bbox_json / point_json 的完整结构），才退化为输出 JSON（包含 ops 或 updates）。
 
+你可以连续多轮调用 tools：
+- 如果一次 tool_calls 不足以完成用户需求，可以先调用一批 tools，等待状态更新后继续调用下一批 tools，直到完成。
+- 注意避免无限循环：通常 1-3 轮就应完成。
+
 当你输出 JSON 时：
 - 必须只输出一个 JSON 对象（不要输出 Markdown，不要输出代码块，不要输出多余文本）。
 - 结构为：
@@ -1545,161 +1549,347 @@ def llm_apply_instruction(
 
     tools = get_motion_tools()
 
-    try:
-        resp = _openai_chat_complete(
-            base_url=llm_base_url,
-            api_key=llm_api_key,
-            model=(llm_model or "").strip(),
-            messages=messages,
-            temperature=0.2,
-            timeout=float(llm_timeout),
-            force_json=False,  # tools 开启时不强制 JSON，有助于提高 tool_calls 命中率
-            tools=tools,
-            tool_choice="auto",
-        )
-        _print_llm_debug(resp)
-    except Exception as e:
-        history.extend([
-            {"role": "user", "content": user_message},
-            {"role": "assistant", "content": f"❌ LLM 调用失败：{e}"},
-        ])
-        return (
-            history,
-            bbox_json_text,
-            point_json_text,
-            camera_json_text,
-            bbox_kf_state,
-            point_kf_state,
-            camera_kf_state,
-            prompt,
-            negative_prompt,
-            height,
-            width,
-            num_frames,
-            fps,
-            num_inference_steps,
-            cfg_scale,
-            sigma_shift,
-            seed,
-            gr.update(),
-            "LLM 调用失败（见对话）",
-            "",
-        )
+    # Allow multi-round tool calling: call -> apply tools -> feed updated state -> call again.
+    # Keep it small to avoid accidental loops.
+    max_tool_rounds = 4
+    tool_names_all: List[str] = []
 
+    # Current mutable state during this instruction
+    cur_prompt = prompt
+    cur_negative_prompt = negative_prompt
+    cur_height = int(height)
+    cur_width = int(width)
+    cur_num_frames = int(num_frames)
+    cur_fps = int(fps)
+    cur_steps = int(num_inference_steps)
+    cur_cfg = float(cfg_scale)
+    cur_sigma = float(sigma_shift)
+    cur_seed = int(seed)
+
+    tool_role_supported = True
+    last_resp: Optional[Dict[str, Any]] = None
+    last_raw_content = ""
+
+    for round_idx in range(max_tool_rounds):
+        try:
+            resp = _openai_chat_complete(
+                base_url=llm_base_url,
+                api_key=llm_api_key,
+                model=(llm_model or "").strip(),
+                messages=messages,
+                temperature=0.2,
+                timeout=float(llm_timeout),
+                force_json=False,  # tools 开启时不强制 JSON，有助于提高 tool_calls 命中率
+                tools=tools,
+                tool_choice="auto",
+            )
+            _print_llm_debug(resp)
+        except Exception as e:
+            history.extend(
+                [
+                    {"role": "user", "content": user_message},
+                    {"role": "assistant", "content": f"❌ LLM 调用失败：{e}"},
+                ]
+            )
+            return (
+                history,
+                bbox_json_text,
+                point_json_text,
+                camera_json_text,
+                bbox_kf_state,
+                point_kf_state,
+                camera_kf_state,
+                prompt,
+                negative_prompt,
+                height,
+                width,
+                num_frames,
+                fps,
+                num_inference_steps,
+                cfg_scale,
+                sigma_shift,
+                seed,
+                gr.update(),
+                "LLM 调用失败（见对话）",
+                "",
+            )
+
+        last_resp = resp
+        try:
+            last_raw_content = resp["choices"][0]["message"].get("content") or ""
+        except Exception:
+            last_raw_content = ""
+
+        tool_calls = _tool_calls_from_response(resp)
+        if not tool_calls:
+            # No tool calls; stop the tool loop and handle content below.
+            break
+
+        gen_params: Dict[str, Any] = {
+            "height": cur_height,
+            "width": cur_width,
+            "num_frames": cur_num_frames,
+            "fps": cur_fps,
+            "num_inference_steps": cur_steps,
+            "cfg_scale": cur_cfg,
+            "sigma_shift": cur_sigma,
+            "seed": cur_seed,
+        }
+
+        (
+            base_bbox_state,
+            base_point_state,
+            base_camera_state,
+            cur_prompt,
+            cur_negative_prompt,
+            gen_params,
+            tool_names,
+        ) = _apply_tool_calls(
+            tool_calls,
+            input_image=input_image,
+            current_frame_idx=int(motion_frame_idx),
+            bbox_state=base_bbox_state,
+            point_state=base_point_state,
+            camera_state=base_camera_state,
+            num_frames=int(cur_num_frames),
+            width=int(cur_width),
+            height=int(cur_height),
+            bbox_json_text=bbox_json_text or "",
+            point_json_text=point_json_text or "",
+            camera_json_text=camera_json_text or "",
+            prompt=cur_prompt,
+            negative_prompt=cur_negative_prompt,
+            gen_params=gen_params,
+        )
+        tool_names_all.extend(tool_names)
+
+        # Apply param updates (snap/clip) after each tool round
+        if "height" in gen_params:
+            snapped = _snap_to_step(gen_params.get("height"), 256, 16, 1280)
+            if snapped is not None:
+                cur_height = int(snapped)
+        if "width" in gen_params:
+            snapped = _snap_to_step(gen_params.get("width"), 256, 16, 1280)
+            if snapped is not None:
+                cur_width = int(snapped)
+        if "num_frames" in gen_params:
+            snapped = _snap_to_step(gen_params.get("num_frames"), 5, 4, 121)
+            if snapped is not None:
+                cur_num_frames = int(snapped)
+        if "fps" in gen_params:
+            snapped = _snap_to_step(gen_params.get("fps"), 8, 1, 30)
+            if snapped is not None:
+                cur_fps = int(snapped)
+        if "num_inference_steps" in gen_params:
+            snapped = _snap_to_step(gen_params.get("num_inference_steps"), 10, 1, 100)
+            if snapped is not None:
+                cur_steps = int(snapped)
+        if "cfg_scale" in gen_params and gen_params.get("cfg_scale") is not None:
+            cur_cfg = max(1.0, min(15.0, float(gen_params.get("cfg_scale"))))
+        if "sigma_shift" in gen_params and gen_params.get("sigma_shift") is not None:
+            cur_sigma = max(1.0, min(15.0, float(gen_params.get("sigma_shift"))))
+        if "seed" in gen_params and gen_params.get("seed") is not None:
+            cur_seed = int(gen_params.get("seed"))
+
+        # Recompute JSON texts for the next round (so the model sees updated state)
+        bbox_json_text = _bbox_state_to_json(base_bbox_state)
+        point_json_text = _point_state_to_json(base_point_state)
+        camera_json_text = _camera_state_to_json(base_camera_state)
+
+        # Feed tool results back to the model. Some OpenAI-compatible backends don't
+        # accept role="tool" messages; fall back to a plain user message when needed.
+        if tool_role_supported:
+            try:
+                assistant_msg = (resp.get("choices") or [{}])[0].get("message") or {}
+                messages.append(
+                    {
+                        "role": "assistant",
+                        "content": assistant_msg.get("content") or "",
+                        "tool_calls": assistant_msg.get("tool_calls") or tool_calls,
+                    }
+                )
+                for tc in tool_calls:
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tc.get("id") or "",
+                            "content": json.dumps({"ok": True}, ensure_ascii=False),
+                        }
+                    )
+            except Exception:
+                tool_role_supported = False
+
+        state_blob = {
+            "prompt": cur_prompt,
+            "negative_prompt": cur_negative_prompt,
+            "height": int(cur_height),
+            "width": int(cur_width),
+            "num_frames": int(cur_num_frames),
+            "fps": int(cur_fps),
+            "num_inference_steps": int(cur_steps),
+            "cfg_scale": float(cur_cfg),
+            "sigma_shift": float(cur_sigma),
+            "seed": int(cur_seed),
+            "bbox_json": bbox_json_text or "",
+            "camera_json": camera_json_text or "",
+            "point_json": point_json_text or "",
+            "current_frame_idx": int(motion_frame_idx),
+        }
+
+        cont_payload = (
+            f"已执行第 {round_idx + 1} 轮 tools：{', '.join(tool_names) if tool_names else '(none)'}\n"
+            "请基于下面的最新状态继续完成用户需求：如果还需要进一步修改，请继续调用 tools；"
+            "如果已经完成，请给出简短说明。\n\n"
+            + json.dumps(state_blob, ensure_ascii=False)
+        )
+        messages.append({"role": "user", "content": cont_payload})
+
+    # End tool loop
+
+    resp = last_resp or {"choices": [{"message": {"content": ""}}]}
+    raw_content = last_raw_content
     tool_calls = _tool_calls_from_response(resp)
 
-    raw_content = ""
-    try:
-        raw_content = resp["choices"][0]["message"].get("content") or ""
-    except Exception:
-        raw_content = ""
-
-    # New outputs
+    # New outputs (initialized from current values; may already be updated by tool loop)
     new_bbox_json = bbox_json_text
     new_point_json = point_json_text
     new_camera_json = camera_json_text
-    new_prompt = prompt
-    new_negative_prompt = negative_prompt
-    new_height = height
-    new_width = width
-    new_num_frames = num_frames
-    new_fps = fps
-    new_steps = num_inference_steps
-    new_cfg = cfg_scale
-    new_sigma = sigma_shift
-    new_seed = seed
+    new_prompt = cur_prompt
+    new_negative_prompt = cur_negative_prompt
+    new_height = cur_height
+    new_width = cur_width
+    new_num_frames = cur_num_frames
+    new_fps = cur_fps
+    new_steps = cur_steps
+    new_cfg = cur_cfg
+    new_sigma = cur_sigma
+    new_seed = cur_seed
 
     assistant_msg = None
 
     try:
-        if tool_calls:
-            gen_params: Dict[str, Any] = {}
-            gen_params["height"] = height
-            gen_params["width"] = width
-            gen_params["num_frames"] = num_frames
-            gen_params["fps"] = fps
-            gen_params["num_inference_steps"] = num_inference_steps
-            gen_params["cfg_scale"] = cfg_scale
-            gen_params["sigma_shift"] = sigma_shift
-            gen_params["seed"] = seed
-
-            (
-                base_bbox_state,
-                base_point_state,
-                base_camera_state,
-                new_prompt,
-                new_negative_prompt,
-                gen_params,
-                tool_names,
-            ) = _apply_tool_calls(
-                tool_calls,
-                input_image=input_image,
-                current_frame_idx=int(motion_frame_idx),
-                bbox_state=base_bbox_state,
-                point_state=base_point_state,
-                camera_state=base_camera_state,
-                num_frames=int(num_frames),
-                width=int(width),
-                height=int(height),
-                bbox_json_text=bbox_json_text or "",
-                point_json_text=point_json_text or "",
-                camera_json_text=camera_json_text or "",
-                prompt=new_prompt,
-                negative_prompt=new_negative_prompt,
-                gen_params=gen_params,
-            )
-
-            # Apply param updates (snap/clip)
-            if "height" in gen_params:
-                snapped = _snap_to_step(gen_params.get("height"), 256, 16, 1280)
-                if snapped is not None:
-                    new_height = int(snapped)
-            if "width" in gen_params:
-                snapped = _snap_to_step(gen_params.get("width"), 256, 16, 1280)
-                if snapped is not None:
-                    new_width = int(snapped)
-            if "num_frames" in gen_params:
-                snapped = _snap_to_step(gen_params.get("num_frames"), 5, 4, 121)
-                if snapped is not None:
-                    new_num_frames = int(snapped)
-            if "fps" in gen_params:
-                snapped = _snap_to_step(gen_params.get("fps"), 8, 1, 30)
-                if snapped is not None:
-                    new_fps = int(snapped)
-            if "num_inference_steps" in gen_params:
-                snapped = _snap_to_step(gen_params.get("num_inference_steps"), 10, 1, 100)
-                if snapped is not None:
-                    new_steps = int(snapped)
-            if "cfg_scale" in gen_params and gen_params.get("cfg_scale") is not None:
-                val = float(gen_params.get("cfg_scale"))
-                new_cfg = max(1.0, min(15.0, val))
-            if "sigma_shift" in gen_params and gen_params.get("sigma_shift") is not None:
-                val = float(gen_params.get("sigma_shift"))
-                new_sigma = max(1.0, min(15.0, val))
-            if "seed" in gen_params and gen_params.get("seed") is not None:
-                new_seed = int(gen_params.get("seed"))
-
+        if tool_names_all:
+            # Tools were applied in this instruction (possibly across multiple rounds).
             new_bbox_json = _bbox_state_to_json(base_bbox_state)
             new_point_json = _point_state_to_json(base_point_state)
             new_camera_json = _camera_state_to_json(base_camera_state)
-
-            assistant_msg = f"✅ 已通过 tools 应用：{', '.join(tool_names)}"
             new_bbox_state = base_bbox_state
             new_point_state = base_point_state
             new_camera_state = base_camera_state
 
-        else:
-            # Fallback: parse as JSON output (ops/updates)
+            # If the final model message is JSON ops/updates, apply it; otherwise treat as plain text.
             content = ""
             try:
                 content = resp["choices"][0]["message"].get("content")
             except Exception:
                 content = ""
-            obj = _extract_json_object(content)
+            obj = None
+            if content and isinstance(content, str):
+                try:
+                    obj = _extract_json_object(content)
+                except Exception:
+                    obj = None
 
-            updates = obj.get("updates", {}) if isinstance(obj, dict) else {}
-            ops = obj.get("ops", []) if isinstance(obj, dict) else []
-            assistant_msg = obj.get("assistant_message") if isinstance(obj, dict) else None
+            if isinstance(obj, dict) and (obj.get("ops") is not None or obj.get("updates") is not None):
+                updates = obj.get("updates", {}) if isinstance(obj, dict) else {}
+                ops = obj.get("ops", []) if isinstance(obj, dict) else []
+                assistant_msg = obj.get("assistant_message") if isinstance(obj, dict) else None
+
+                if ops and isinstance(ops, list):
+                    base_bbox_state, base_point_state, base_camera_state = apply_ops_to_states(
+                        ops,
+                        base_bbox_state,
+                        base_point_state,
+                        base_camera_state,
+                        num_frames=int(new_num_frames),
+                        width=int(new_width),
+                        height=int(new_height),
+                        bbox_json_text=new_bbox_json or "",
+                        point_json_text=new_point_json or "",
+                        camera_json_text=new_camera_json or "",
+                    )
+                    new_bbox_json = _bbox_state_to_json(base_bbox_state)
+                    new_point_json = _point_state_to_json(base_point_state)
+                    new_camera_json = _camera_state_to_json(base_camera_state)
+
+                if "bbox_json" in updates:
+                    new_bbox_json = _ensure_json_text(updates.get("bbox_json")) or ""
+                    if new_bbox_json.strip():
+                        json.loads(new_bbox_json)
+                if "point_json" in updates:
+                    new_point_json = _ensure_json_text(updates.get("point_json")) or ""
+                    if new_point_json.strip():
+                        json.loads(new_point_json)
+                if "camera_json" in updates:
+                    new_camera_json = _ensure_json_text(updates.get("camera_json")) or ""
+                    if new_camera_json.strip():
+                        json.loads(new_camera_json)
+
+                if "prompt" in updates and updates.get("prompt") is not None:
+                    new_prompt = str(updates.get("prompt"))
+                if "negative_prompt" in updates and updates.get("negative_prompt") is not None:
+                    new_negative_prompt = str(updates.get("negative_prompt"))
+
+                if "height" in updates:
+                    snapped = _snap_to_step(updates.get("height"), 256, 16, 1280)
+                    if snapped is not None:
+                        new_height = int(snapped)
+                if "width" in updates:
+                    snapped = _snap_to_step(updates.get("width"), 256, 16, 1280)
+                    if snapped is not None:
+                        new_width = int(snapped)
+                if "num_frames" in updates:
+                    snapped = _snap_to_step(updates.get("num_frames"), 5, 4, 121)
+                    if snapped is not None:
+                        new_num_frames = int(snapped)
+                if "fps" in updates:
+                    snapped = _snap_to_step(updates.get("fps"), 8, 1, 30)
+                    if snapped is not None:
+                        new_fps = int(snapped)
+                if "num_inference_steps" in updates:
+                    snapped = _snap_to_step(updates.get("num_inference_steps"), 10, 1, 100)
+                    if snapped is not None:
+                        new_steps = int(snapped)
+                if "cfg_scale" in updates and updates.get("cfg_scale") is not None:
+                    new_cfg = max(1.0, min(15.0, float(updates.get("cfg_scale"))))
+                if "sigma_shift" in updates and updates.get("sigma_shift") is not None:
+                    new_sigma = max(1.0, min(15.0, float(updates.get("sigma_shift"))))
+                if "seed" in updates and updates.get("seed") is not None:
+                    new_seed = int(updates.get("seed"))
+
+                new_bbox_state = _bbox_state_from_json_text(new_bbox_json)
+                new_point_state = _point_state_from_json_text(new_point_json)
+                new_camera_state = _camera_state_from_json_text(new_camera_json)
+            else:
+                # Plain text final message: use it if present; otherwise show applied tools summary.
+                s = ("" if content is None else str(content)).strip()
+                assistant_msg = s if s else f"✅ 已通过 tools 应用：{', '.join(tool_names_all)}"
+
+        else:
+            # Fallback: parse as JSON output (ops/updates). If not JSON, show plain text and apply nothing.
+            content = ""
+            try:
+                content = resp["choices"][0]["message"].get("content")
+            except Exception:
+                content = ""
+            obj = None
+            if content and isinstance(content, str):
+                try:
+                    obj = _extract_json_object(content)
+                except Exception:
+                    obj = None
+
+            if obj is None:
+                assistant_msg = ("" if content is None else str(content)).strip() or "✅ 已应用更新"
+                new_bbox_state = base_bbox_state
+                new_point_state = base_point_state
+                new_camera_state = base_camera_state
+            else:
+                obj = obj
+
+                updates = obj.get("updates", {}) if isinstance(obj, dict) else {}
+                ops = obj.get("ops", []) if isinstance(obj, dict) else []
+                assistant_msg = obj.get("assistant_message") if isinstance(obj, dict) else None
 
             # Apply ops first
             if ops and isinstance(ops, list):
@@ -1767,10 +1957,10 @@ def llm_apply_instruction(
             if "seed" in updates:
                 new_seed = int(updates.get("seed"))
 
-            # Sync states from JSON after updates
-            new_bbox_state = _bbox_state_from_json_text(new_bbox_json)
-            new_point_state = _point_state_from_json_text(new_point_json)
-            new_camera_state = _camera_state_from_json_text(new_camera_json)
+                # Sync states from JSON after updates
+                new_bbox_state = _bbox_state_from_json_text(new_bbox_json)
+                new_point_state = _point_state_from_json_text(new_point_json)
+                new_camera_state = _camera_state_from_json_text(new_camera_json)
 
     except Exception as e:
         history.extend([
