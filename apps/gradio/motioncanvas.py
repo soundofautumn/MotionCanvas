@@ -1554,16 +1554,7 @@ with gr.Blocks(
                         with gr.Row():
                             camera_save_btn = gr.Button("保存当前帧相机", variant="secondary")
                             camera_delete_btn = gr.Button("删除当前帧相机", variant="secondary")
-
-                        gr.Markdown("### 轨迹预览", elem_classes="section-title")
-                        with gr.Row():
-                            preview_btn = gr.Button(
-                                "预览 2D 控制", variant="secondary"
-                            )
-                        preview_video = gr.Video(
-                            label="2D 控制预览视频", interactive=False
-                        )
-
+                        
                     # ---- LLM 助手 Tab ----
                     with gr.Tab("LLM 助手"):
                         gr.Markdown("### LLM 助手（DeepSeek / OpenAI 兼容）", elem_classes="section-title")
@@ -1655,6 +1646,14 @@ with gr.Blocks(
                             )
 
 
+            gr.Markdown("### 轨迹预览", elem_classes="section-title")
+            with gr.Row():
+                preview_btn = gr.Button(
+                    "预览 2D 控制", variant="secondary"
+                )
+            preview_video = gr.Video(
+                label="2D 控制预览视频", interactive=False
+            )
 
             generate_btn = gr.Button(
                 "生成视频", variant="primary", size="lg",
