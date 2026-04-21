@@ -20,6 +20,7 @@ import re
 from typing import Any, Dict, List, Optional, Tuple
 
 import gradio as gr
+import numpy as np
 from PIL import Image
 
 
@@ -1627,6 +1628,34 @@ def llm_apply_instruction(
     user_message = (user_message or "").strip()
 
     history = _normalize_chat_history(chat_history)
+
+    def _camera_values_for_frame(camera_state: Dict[str, Any], frame_idx: int) -> Tuple[float, float, float, float]:
+        fi = str(int(frame_idx))
+        params = camera_state.get(fi)
+        if not isinstance(params, dict):
+            return 1.0, 0.0, 0.0, 0.0
+        return (
+            float(params.get("zoom", 1.0)),
+            float(params.get("pan_x", 0.0)),
+            float(params.get("pan_y", 0.0)),
+            float(params.get("rotation", 0.0)),
+        )
+
+    def _editor_canvas_from_input(img: Optional[Image.Image]):
+        if img is None:
+            return gr.update()
+        try:
+            return np.array(img)
+        except Exception:
+            return gr.update()
+
+    # Defaults for outputs that sync back to motion editor
+    default_cam_zoom, default_cam_pan_x, default_cam_pan_y, default_cam_rot = _camera_values_for_frame(
+        dict(camera_kf_state or {}),
+        int(motion_frame_idx),
+    )
+    default_bbox_canvas = _editor_canvas_from_input(input_image)
+    default_point_canvas = _editor_canvas_from_input(input_image)
     if not user_message:
         # 不抛异常，避免输入框进入错误态导致无法继续操作
         return (
@@ -1648,6 +1677,12 @@ def llm_apply_instruction(
             sigma_shift,
             seed,
             gr.update(),
+            default_cam_zoom,
+            default_cam_pan_x,
+            default_cam_pan_y,
+            default_cam_rot,
+            default_bbox_canvas,
+            default_point_canvas,
             gr.update(),
             "请输入你的要求",
             user_message,
@@ -1768,6 +1803,12 @@ def llm_apply_instruction(
                 sigma_shift,
                 seed,
                 gr.update(),
+                default_cam_zoom,
+                default_cam_pan_x,
+                default_cam_pan_y,
+                default_cam_rot,
+                default_bbox_canvas,
+                default_point_canvas,
                 send_image_checkbox_update,
                 "LLM 调用失败（见对话）",
                 "",
@@ -1859,6 +1900,12 @@ def llm_apply_instruction(
                 sigma_shift,
                 seed,
                 gr.update(),
+                default_cam_zoom,
+                default_cam_pan_x,
+                default_cam_pan_y,
+                default_cam_rot,
+                default_bbox_canvas,
+                default_point_canvas,
                 send_image_checkbox_update,
                 "需要用户确认",
                 "",
@@ -2202,6 +2249,12 @@ def llm_apply_instruction(
             sigma_shift,
             seed,
             gr.update(),
+            default_cam_zoom,
+            default_cam_pan_x,
+            default_cam_pan_y,
+            default_cam_rot,
+            default_bbox_canvas,
+            default_point_canvas,
             send_image_checkbox_update,
             "LLM 输出不合法（未应用）",
             "",
@@ -2225,6 +2278,11 @@ def llm_apply_instruction(
     new_frame_val = min(cur_frame, max_frame)
     frame_update = gr.update(minimum=0, maximum=max_frame, value=new_frame_val)
 
+    # Sync camera sliders + reset editor canvases so motion editor reflects new state immediately.
+    cam_zoom_v, cam_pan_x_v, cam_pan_y_v, cam_rot_v = _camera_values_for_frame(new_camera_state, new_frame_val)
+    bbox_canvas_v = _editor_canvas_from_input(input_image)
+    point_canvas_v = _editor_canvas_from_input(input_image)
+
     return (
         history,
         new_bbox_json,
@@ -2244,6 +2302,12 @@ def llm_apply_instruction(
         new_sigma,
         new_seed,
         frame_update,
+        cam_zoom_v,
+        cam_pan_x_v,
+        cam_pan_y_v,
+        cam_rot_v,
+        bbox_canvas_v,
+        point_canvas_v,
         send_image_checkbox_update,
         "✅ 已应用 LLM 更新",
         "",
