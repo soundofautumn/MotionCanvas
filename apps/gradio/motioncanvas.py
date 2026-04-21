@@ -1429,7 +1429,7 @@ with gr.Blocks(
             prompt = gr.Textbox(
                 label="正面提示词", lines=3,
                 placeholder="描述你想生成的视频内容...",
-                value="A beautiful woman walking on the beach",
+                value="",
             )
             negative_prompt = gr.Textbox(
                 label="负面提示词", lines=2, value=DEFAULT_NEGATIVE_PROMPT,
