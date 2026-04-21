@@ -250,6 +250,12 @@ LLM_SYSTEM_PROMPT = """你是 MotionCanvas 的“镜头/物体运动控制 + 生
 - 如果一次 tool_calls 不足以完成用户需求，可以先调用一批 tools，等待状态更新后继续调用下一批 tools，直到完成。
 - 注意避免无限循环：通常 1-3 轮就应完成。
 
+关于起始帧图像的发送规则：
+- 起始帧图像默认不会在每次消息都发送。
+- 如果用户在 UI 勾选了“发送图片”，则本次请求会强制附带一次起始帧图像；发送完成后 UI 会自动取消勾选。
+- 后续如果你仍然需要查看图像，请通过 tools 主动调用 get_input_image 获取压缩后的图像 data_url。
+- 对于“获取物体 bbox/点位”的需求，优先调用 yolo_detect_bbox / yolo_detect_point（服务端会直接在 input_image 上执行，不必把整张图发回模型）。
+
 当你输出 JSON 时：
 - 必须只输出一个 JSON 对象（不要输出 Markdown，不要输出代码块，不要输出多余文本）。
 - 结构为：
@@ -1181,6 +1187,24 @@ def get_motion_tools() -> List[Dict[str, Any]]:
             },
         },
 
+        # --- On-demand image access ---
+        {
+            "type": "function",
+            "function": {
+                "name": "get_input_image",
+                "description": "Get the (compressed) input image as a data_url for on-demand visual inspection.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "max_side": {"type": "integer", "description": "Max side length for resizing. Default 384."},
+                        "image_format": {"type": "string", "enum": ["JPEG", "PNG"], "description": "Default JPEG."},
+                        "jpeg_quality": {"type": "integer", "description": "JPEG quality (1-95). Default 80."},
+                    },
+                    "required": [],
+                },
+            },
+        },
+
         # --- Localization tools (YOLO) ---
         {
             "type": "function",
@@ -1243,8 +1267,9 @@ def _apply_tool_calls(
     prompt: str,
     negative_prompt: str,
     gen_params: Dict[str, Any],
-) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any], str, str, Dict[str, Any], List[str]]:
+) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any], str, str, Dict[str, Any], List[str], List[Dict[str, Any]]]:
     msgs: List[str] = []
+    tool_results: List[Dict[str, Any]] = []
 
     def _cap_frame_local(v, default_v=0):
         try:
@@ -1257,11 +1282,21 @@ def _apply_tool_calls(
     for call in tool_calls:
         fn = (call.get("function") or {})
         name = str(fn.get("name") or "").strip()
+        call_id = call.get("id") or ""
         args_raw = fn.get("arguments")
         try:
             args = json.loads(args_raw) if isinstance(args_raw, str) else (args_raw or {})
         except Exception:
             args = {}
+
+        def _add_result(payload: Any):
+            tool_results.append(
+                {
+                    "tool_call_id": str(call_id),
+                    "name": name,
+                    "content": json.dumps(payload, ensure_ascii=False),
+                }
+            )
 
         if name == "camera_set":
             op = {
@@ -1275,48 +1310,56 @@ def _apply_tool_calls(
                 [op], bbox_state, point_state, camera_state, num_frames, width, height, bbox_json_text=bbox_json_text, point_json_text=point_json_text, camera_json_text=camera_json_text
             )
             msgs.append("camera_set")
+            _add_result({"ok": True, "applied": "camera_set"})
         elif name == "camera_zoom_linear":
             op = {"op": "camera.zoom_linear", **args}
             bbox_state, point_state, camera_state = apply_ops_to_states(
                 [op], bbox_state, point_state, camera_state, num_frames, width, height, bbox_json_text=bbox_json_text, point_json_text=point_json_text, camera_json_text=camera_json_text
             )
             msgs.append("camera_zoom_linear")
+            _add_result({"ok": True, "applied": "camera_zoom_linear"})
         elif name == "camera_pan_linear":
             op = {"op": "camera.pan_linear", **args}
             bbox_state, point_state, camera_state = apply_ops_to_states(
                 [op], bbox_state, point_state, camera_state, num_frames, width, height, bbox_json_text=bbox_json_text, point_json_text=point_json_text, camera_json_text=camera_json_text
             )
             msgs.append("camera_pan_linear")
+            _add_result({"ok": True, "applied": "camera_pan_linear"})
         elif name == "camera_rotation_linear":
             op = {"op": "camera.rotation_linear", **args}
             bbox_state, point_state, camera_state = apply_ops_to_states(
                 [op], bbox_state, point_state, camera_state, num_frames, width, height, bbox_json_text=bbox_json_text, point_json_text=point_json_text, camera_json_text=camera_json_text
             )
             msgs.append("camera_rotation_linear")
+            _add_result({"ok": True, "applied": "camera_rotation_linear"})
         elif name == "bbox_translate":
             op = {"op": "bbox.translate", **args}
             bbox_state, point_state, camera_state = apply_ops_to_states(
                 [op], bbox_state, point_state, camera_state, num_frames, width, height, bbox_json_text=bbox_json_text, point_json_text=point_json_text, camera_json_text=camera_json_text
             )
             msgs.append("bbox_translate")
+            _add_result({"ok": True, "applied": "bbox_translate"})
         elif name == "bbox_set":
             op = {"op": "bbox.set", "frame": args.get("frame", 0), "bbox": args.get("bbox"), "space": args.get("space", "norm")}
             bbox_state, point_state, camera_state = apply_ops_to_states(
                 [op], bbox_state, point_state, camera_state, num_frames, width, height, bbox_json_text=bbox_json_text, point_json_text=point_json_text, camera_json_text=camera_json_text
             )
             msgs.append("bbox_set")
+            _add_result({"ok": True, "applied": "bbox_set"})
         elif name == "points_translate":
             op = {"op": "points.translate", **args}
             bbox_state, point_state, camera_state = apply_ops_to_states(
                 [op], bbox_state, point_state, camera_state, num_frames, width, height, bbox_json_text=bbox_json_text, point_json_text=point_json_text, camera_json_text=camera_json_text
             )
             msgs.append("points_translate")
+            _add_result({"ok": True, "applied": "points_translate"})
         elif name == "points_set":
             op = {"op": "points.set", "frame": args.get("frame", 0), "points": args.get("points"), "space": args.get("space", "norm")}
             bbox_state, point_state, camera_state = apply_ops_to_states(
                 [op], bbox_state, point_state, camera_state, num_frames, width, height, bbox_json_text=bbox_json_text, point_json_text=point_json_text, camera_json_text=camera_json_text
             )
             msgs.append("points_set")
+            _add_result({"ok": True, "applied": "points_set"})
         elif name == "set_generation_params":
             # Only update fields that exist
             if isinstance(args, dict):
@@ -1331,6 +1374,24 @@ def _apply_tool_calls(
                     if k in args and args.get(k) is not None:
                         gen_params[k] = args.get(k)
             msgs.append("set_generation_params")
+            _add_result({"ok": True, "applied": "set_generation_params"})
+        elif name == "get_input_image":
+            if input_image is None:
+                raise gr.Error("未提供 input_image，无法获取起始帧图像（请上传起始帧图像）")
+
+            max_side = int(args.get("max_side", 384) or 384)
+            image_format = str(args.get("image_format", "JPEG") or "JPEG")
+            jpeg_quality = int(args.get("jpeg_quality", 80) or 80)
+
+            data_url = pil_to_data_url(
+                input_image,
+                max_side=max_side,
+                image_format=image_format,
+                jpeg_quality=jpeg_quality,
+            )
+            w, h = input_image.size
+            msgs.append(f"get_input_image(max_side={max_side})")
+            _add_result({"ok": True, "width": int(w), "height": int(h), "data_url": data_url})
         elif name in {"yolo_detect_bbox", "yolo_detect_point"}:
             if input_image is None:
                 raise gr.Error("未提供 input_image，无法执行 YOLO 定位（请上传起始帧图像）")
@@ -1344,6 +1405,7 @@ def _apply_tool_calls(
                 # Keep as soft failure (no state change) but reflect in assistant message.
                 label_dbg = class_name if class_name else "<any>"
                 msgs.append(f"{name}:not_found({label_dbg})")
+                _add_result({"ok": True, "found": False, "class_name": class_name, "min_conf": min_conf})
                 continue
 
             img_w, img_h = input_image.size
@@ -1354,15 +1416,18 @@ def _apply_tool_calls(
             if name == "yolo_detect_bbox":
                 bbox_state[fi] = bbox_norm
                 msgs.append(f"yolo_detect_bbox({det.get('label')},conf={float(det.get('conf',0)):.2f},frame={f})")
+                _add_result({"ok": True, "found": True, "frame": int(f), "label": det.get("label"), "conf": float(det.get("conf", 0.0)), "bbox_norm": bbox_norm})
             else:
                 cx = (bbox_norm[0] + bbox_norm[2]) / 2.0
                 cy = (bbox_norm[1] + bbox_norm[3]) / 2.0
                 point_state[fi] = [[round(_clamp01(cx), 4), round(_clamp01(cy), 4)]]
                 msgs.append(f"yolo_detect_point({det.get('label')},conf={float(det.get('conf',0)):.2f},frame={f})")
+                _add_result({"ok": True, "found": True, "frame": int(f), "label": det.get("label"), "conf": float(det.get("conf", 0.0)), "point_norm": point_state[fi][0], "bbox_norm": bbox_norm})
         else:
             msgs.append(f"unknown_tool:{name}")
+            _add_result({"ok": False, "error": f"unknown_tool:{name}"})
 
-    return bbox_state, point_state, camera_state, prompt, negative_prompt, gen_params, msgs
+    return bbox_state, point_state, camera_state, prompt, negative_prompt, gen_params, msgs, tool_results
 
 
 # ==================== Public UI callback ====================
@@ -1495,6 +1560,7 @@ def llm_apply_instruction(
             sigma_shift,
             seed,
             gr.update(),
+            gr.update(),
             "请输入你的要求",
             user_message,
         )
@@ -1526,7 +1592,8 @@ def llm_apply_instruction(
         + json.dumps(state_blob, ensure_ascii=False)
     )
 
-    if bool(llm_send_image):
+    sent_image_this_turn = bool(llm_send_image)
+    if sent_image_this_turn:
         if input_image is None:
             raise gr.Error("已勾选发送图片，但未上传起始帧图像")
         data_url = pil_to_data_url(input_image, max_side=768)
@@ -1553,6 +1620,9 @@ def llm_apply_instruction(
     # Keep it small to avoid accidental loops.
     max_tool_rounds = 4
     tool_names_all: List[str] = []
+
+    # If we sent the image due to checkbox, auto-uncheck after this request.
+    send_image_checkbox_update = gr.update(value=False) if sent_image_this_turn else gr.update()
 
     # Current mutable state during this instruction
     cur_prompt = prompt
@@ -1610,6 +1680,7 @@ def llm_apply_instruction(
                 sigma_shift,
                 seed,
                 gr.update(),
+                send_image_checkbox_update,
                 "LLM 调用失败（见对话）",
                 "",
             )
@@ -1644,6 +1715,7 @@ def llm_apply_instruction(
             cur_negative_prompt,
             gen_params,
             tool_names,
+            tool_results,
         ) = _apply_tool_calls(
             tool_calls,
             input_image=input_image,
@@ -1708,12 +1780,12 @@ def llm_apply_instruction(
                         "tool_calls": assistant_msg.get("tool_calls") or tool_calls,
                     }
                 )
-                for tc in tool_calls:
+                for tr in (tool_results or []):
                     messages.append(
                         {
                             "role": "tool",
-                            "tool_call_id": tc.get("id") or "",
-                            "content": json.dumps({"ok": True}, ensure_ascii=False),
+                            "tool_call_id": tr.get("tool_call_id") or "",
+                            "content": tr.get("content") or "{}",
                         }
                     )
             except Exception:
@@ -1736,8 +1808,23 @@ def llm_apply_instruction(
             "current_frame_idx": int(motion_frame_idx),
         }
 
+        tool_results_blob = []
+        try:
+            for tr in (tool_results or []):
+                tool_results_blob.append(
+                    {
+                        "name": tr.get("name"),
+                        "content": tr.get("content"),
+                    }
+                )
+        except Exception:
+            tool_results_blob = []
+
         cont_payload = (
             f"已执行第 {round_idx + 1} 轮 tools：{', '.join(tool_names) if tool_names else '(none)'}\n"
+            "tool 返回（如有）：\n"
+            + json.dumps(tool_results_blob, ensure_ascii=False)
+            + "\n\n"
             "请基于下面的最新状态继续完成用户需求：如果还需要进一步修改，请继续调用 tools；"
             "如果已经完成，请给出简短说明。\n\n"
             + json.dumps(state_blob, ensure_ascii=False)
@@ -1986,6 +2073,7 @@ def llm_apply_instruction(
             sigma_shift,
             seed,
             gr.update(),
+            send_image_checkbox_update,
             "LLM 输出不合法（未应用）",
             "",
         )
@@ -2027,6 +2115,7 @@ def llm_apply_instruction(
         new_sigma,
         new_seed,
         frame_update,
+        send_image_checkbox_update,
         "✅ 已应用 LLM 更新",
         "",
     )
