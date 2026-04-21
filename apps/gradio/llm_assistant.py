@@ -239,7 +239,11 @@ LLM_SYSTEM_PROMPT = """你是 MotionCanvas 的“镜头/物体运动控制 + 生
 - 运动 JSON：bbox_json、camera_json、point_json
 
 优先策略：
-1) 优先使用 tools（函数调用）表达修改意图：camera_set / camera_zoom_linear / camera_pan_linear / camera_rotation_linear / bbox_translate / points_translate / set_generation_params。
+1) 优先使用 tools（函数调用）表达修改意图：
+    - 相机：camera_set / camera_zoom_linear / camera_pan_linear / camera_rotation_linear
+    - bbox：bbox_set（精确写入某帧）/ bbox_translate（平移一段帧区间）
+    - 点轨迹：points_set（精确写入某帧）/ points_translate（平移一段帧区间）
+    - 生成参数：set_generation_params
 2) 如果后端不支持 tools，或你需要一次性写入完整 JSON（例如直接给出 bbox_json / point_json 的完整结构），才退化为输出 JSON（包含 ops 或 updates）。
 
 当你输出 JSON 时：
@@ -253,8 +257,10 @@ LLM_SYSTEM_PROMPT = """你是 MotionCanvas 的“镜头/物体运动控制 + 生
 
 ops 语义（可选，用于增量编辑）：
 - camera.set / camera.zoom_linear / camera.pan_linear / camera.rotation_linear
+- bbox.set（精确设置某一帧 bbox；bbox=[x1,y1,x2,y2]，space=norm/px，px 会换算到 norm）
 - bbox.translate（dx/dy 可用 norm 或 px；px 时会按 width/height 自动换算到 norm）
-- points.translate（同上）
+- points.set（精确设置某一帧的点列表；points=[[x,y],...]，space=norm/px，px 会换算到 norm）
+- points.translate（dx/dy 可用 norm 或 px；px 时会按 width/height 自动换算到 norm）
 
 updates 语义（可选，用于直接覆盖字段）：
 - updates.bbox_json / updates.camera_json / updates.point_json 可以直接给完整 JSON 字符串或对象。
@@ -653,6 +659,45 @@ def apply_ops_to_states(
             }
             continue
 
+        if op == "bbox.set":
+            f = _cap_frame(item.get("frame", 0), 0)
+            fi = str(int(f))
+            space = str(item.get("space", "norm")).strip().lower()
+            bb = item.get("bbox")
+            if not isinstance(bb, (list, tuple)) or len(bb) != 4:
+                continue
+            x1, y1, x2, y2 = [float(v) for v in bb]
+            if space in {"px", "pixel", "pixels"}:
+                x1, x2 = x1 / max(1.0, float(w)), x2 / max(1.0, float(w))
+                y1, y2 = y1 / max(1.0, float(h)), y2 / max(1.0, float(h))
+            x1, y1, x2, y2 = _clamp01(x1), _clamp01(y1), _clamp01(x2), _clamp01(y2)
+            if x2 <= x1:
+                x2 = _clamp01(x1 + 1e-4)
+            if y2 <= y1:
+                y2 = _clamp01(y1 + 1e-4)
+            bbox_state[fi] = [round(x1, 4), round(y1, 4), round(x2, 4), round(y2, 4)]
+            continue
+
+        if op == "points.set":
+            f = _cap_frame(item.get("frame", 0), 0)
+            fi = str(int(f))
+            space = str(item.get("space", "norm")).strip().lower()
+            pts = item.get("points")
+            if not isinstance(pts, list) or not pts:
+                continue
+            out_pts: List[List[float]] = []
+            for xy in pts:
+                if not isinstance(xy, (list, tuple)) or len(xy) < 2:
+                    continue
+                x, y = float(xy[0]), float(xy[1])
+                if space in {"px", "pixel", "pixels"}:
+                    x = x / max(1.0, float(w))
+                    y = y / max(1.0, float(h))
+                out_pts.append([round(_clamp01(x), 4), round(_clamp01(y), 4)])
+            if out_pts:
+                point_state[fi] = out_pts
+            continue
+
         if op in {"camera.zoom_linear", "camera.pan_linear", "camera.rotation_linear"}:
             sf = _cap_frame(item.get("start_frame", 0), 0)
             ef = _cap_frame(item.get("end_frame", nf - 1), nf - 1)
@@ -867,6 +912,22 @@ def get_motion_tools() -> List[Dict[str, Any]]:
         {
             "type": "function",
             "function": {
+                "name": "bbox_set",
+                "description": "Set bbox for a specific frame (norm or px). This writes an exact [x1,y1,x2,y2] box into bbox_json.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "frame": {"type": "integer"},
+                        "bbox": {"type": "array", "items": {"type": "number"}, "minItems": 4, "maxItems": 4},
+                        "space": {"type": "string", "enum": ["norm", "px"]},
+                    },
+                    "required": ["frame", "bbox"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
                 "name": "points_translate",
                 "description": "Translate point keyframes by dx/dy (norm or px) between frames.",
                 "parameters": {
@@ -879,6 +940,26 @@ def get_motion_tools() -> List[Dict[str, Any]]:
                         "space": {"type": "string", "enum": ["norm", "px"]},
                     },
                     "required": ["start_frame", "end_frame", "dx", "dy"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "points_set",
+                "description": "Set point(s) for a specific frame (norm or px). This overwrites that frame's points list in point_json.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "frame": {"type": "integer"},
+                        "points": {
+                            "type": "array",
+                            "items": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2},
+                            "minItems": 1,
+                        },
+                        "space": {"type": "string", "enum": ["norm", "px"]},
+                    },
+                    "required": ["frame", "points"],
                 },
             },
         },
@@ -1024,12 +1105,24 @@ def _apply_tool_calls(
                 [op], bbox_state, point_state, camera_state, num_frames, width, height, bbox_json_text=bbox_json_text, point_json_text=point_json_text, camera_json_text=camera_json_text
             )
             msgs.append("bbox_translate")
+        elif name == "bbox_set":
+            op = {"op": "bbox.set", "frame": args.get("frame", 0), "bbox": args.get("bbox"), "space": args.get("space", "norm")}
+            bbox_state, point_state, camera_state = apply_ops_to_states(
+                [op], bbox_state, point_state, camera_state, num_frames, width, height, bbox_json_text=bbox_json_text, point_json_text=point_json_text, camera_json_text=camera_json_text
+            )
+            msgs.append("bbox_set")
         elif name == "points_translate":
             op = {"op": "points.translate", **args}
             bbox_state, point_state, camera_state = apply_ops_to_states(
                 [op], bbox_state, point_state, camera_state, num_frames, width, height, bbox_json_text=bbox_json_text, point_json_text=point_json_text, camera_json_text=camera_json_text
             )
             msgs.append("points_translate")
+        elif name == "points_set":
+            op = {"op": "points.set", "frame": args.get("frame", 0), "points": args.get("points"), "space": args.get("space", "norm")}
+            bbox_state, point_state, camera_state = apply_ops_to_states(
+                [op], bbox_state, point_state, camera_state, num_frames, width, height, bbox_json_text=bbox_json_text, point_json_text=point_json_text, camera_json_text=camera_json_text
+            )
+            msgs.append("points_set")
         elif name == "set_generation_params":
             # Only update fields that exist
             if isinstance(args, dict):
