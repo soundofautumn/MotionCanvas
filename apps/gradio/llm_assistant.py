@@ -251,6 +251,99 @@ def _get_sam_predictor():
     return predictor
 
 
+def _score_sam_mask(
+    mask: np.ndarray,
+    score: float,
+    box_xyxy: np.ndarray,
+) -> float:
+    """Score a SAM mask by quality metrics (not just raw confidence).
+
+    With multimask_output=True, SAM returns 3 masks: whole/part/subpart.
+    The subpart often has the highest raw score but is too small for a good
+    centroid.  This function combines:
+      - area ratio (prefer masks covering 20-65% of the bbox)
+      - IoU with bbox (prefer masks well-contained in bbox)
+      - raw confidence score (lower weight)
+
+    Returns a quality score in [0, 1]; higher is better.
+    """
+    x1, y1, x2, y2 = [float(v) for v in box_xyxy]
+    box_w = x2 - x1
+    box_h = y2 - y1
+    box_area = box_w * box_h
+    if box_area <= 0:
+        return 0.0
+
+    mask_pixels = int(mask.sum())
+    if mask_pixels == 0:
+        return 0.0
+
+    area_ratio = mask_pixels / box_area
+
+    # area_score: prefer masks that cover 20-65% of the bbox (whole-object range)
+    if area_ratio < 0.10:
+        area_score = area_ratio / 0.10  # severe penalty for tiny masks
+    elif area_ratio <= 0.55:
+        area_score = 1.0  # ideal range
+    elif area_ratio <= 0.80:
+        area_score = 1.0 - (area_ratio - 0.55) / 0.25  # mild penalty for large
+    else:
+        area_score = max(0.0, 1.0 - (area_ratio - 0.80) / 0.20)  # penalty for too large
+
+    # bbox_center_score: prefer masks whose centroid is close to the bbox center
+    ys, xs = np.where(mask.astype(bool))
+    if xs.size == 0 or ys.size == 0:
+        return 0.0
+    mask_cx = float(xs.mean())
+    mask_cy = float(ys.mean())
+    bbox_cx = x1 + box_w / 2.0
+    bbox_cy = y1 + box_h / 2.0
+    dx = (mask_cx - bbox_cx) / max(1.0, box_w / 2.0)
+    dy = (mask_cy - bbox_cy) / max(1.0, box_h / 2.0)
+    center_dist = math.sqrt(dx * dx + dy * dy)
+    center_score = max(0.0, 1.0 - center_dist)
+
+    # Combined: area quality is most important, center helps break ties.
+    quality = 0.40 * area_score + 0.30 * center_score + 0.30 * score
+    return quality
+
+
+def _clean_sam_mask(mask: np.ndarray) -> np.ndarray:
+    """Clean a binary mask: remove small noise and fill holes."""
+    try:
+        from scipy import ndimage
+
+        mask_area = int(mask.sum())
+        if mask_area == 0:
+            return mask
+
+        # Remove small connected components (< 0.5% of mask area)
+        min_size = max(1, int(mask_area * 0.005))
+        labeled, num_features = ndimage.label(mask)
+        cleaned = np.zeros_like(mask, dtype=bool)
+        for j in range(1, num_features + 1):
+            component = labeled == j
+            if int(component.sum()) >= min_size:
+                cleaned |= component
+
+        # Fill holes
+        cleaned = ndimage.binary_fill_holes(cleaned)
+
+        # Light morphological closing to connect nearby parts
+        struct = ndimage.generate_binary_structure(2, 1)
+        cleaned = ndimage.binary_closing(cleaned, structure=struct, iterations=1)
+
+        return cleaned.astype(np.uint8)
+    except ImportError:
+        # Fallback: simple row-wise hole filling
+        cleaned = (mask.astype(bool)).astype(np.uint8)
+        for row in range(cleaned.shape[0]):
+            where_true = np.where(cleaned[row])[0]
+            if len(where_true) >= 2:
+                cleaned[row, where_true[0] : where_true[-1] + 1] = 1
+        return cleaned
+
+
 def _sam_point_from_box(
     image: Image.Image,
     *,
@@ -258,6 +351,12 @@ def _sam_point_from_box(
     method: str = "centroid",
 ) -> Optional[List[float]]:
     """Use SAM to refine a point from a bbox.
+
+    Improved over naive argmax(scores):
+    1. Scores each of the 3 multimask_output masks by quality (area ratio,
+       center proximity, confidence) instead of raw score only.
+    2. Cleans the selected mask (removes noise, fills holes).
+    3. Uses a two-pass approach: bbox -> mask -> centroid -> point+bbox -> refined mask.
 
     method:
       - centroid: mask centroid
@@ -278,27 +377,97 @@ def _sam_point_from_box(
     predictor.set_image(img_np)
 
     x1n, y1n, x2n, y2n = [float(v) for v in box_norm]
-    x1 = max(0.0, min(float(w - 1), x1n * float(w)))
-    y1 = max(0.0, min(float(h - 1), y1n * float(h)))
-    x2 = max(0.0, min(float(w - 1), x2n * float(w)))
-    y2 = max(0.0, min(float(h - 1), y2n * float(h)))
+    # Expand bbox by 5% on each side — SAM often segments better with a slightly
+    # looser box, especially when GDINO gives a very tight crop.
+    pad_x = (x2n - x1n) * 0.05
+    pad_y = (y2n - y1n) * 0.05
+    x1 = max(0.0, min(float(w - 1), (x1n - pad_x) * float(w)))
+    y1 = max(0.0, min(float(h - 1), (y1n - pad_y) * float(h)))
+    x2 = max(0.0, min(float(w - 1), (x2n + pad_x) * float(w)))
+    y2 = max(0.0, min(float(h - 1), (y2n + pad_y) * float(h)))
     if x2 <= x1 or y2 <= y1:
         return None
 
     box_xyxy = np.array([x1, y1, x2, y2], dtype=np.float32)
+    box_w = x2 - x1
+    box_h = y2 - y1
+
+    # ---- Pass 1: bbox prompt -> select best mask by quality ----
     masks, scores, _ = predictor.predict(box=box_xyxy, multimask_output=True)
     if masks is None or len(masks) == 0:
         return None
 
-    best_i = int(np.argmax(scores)) if scores is not None and len(scores) > 0 else 0
-    mask = masks[best_i]
-    if mask is None:
+    best_i: Optional[int] = None
+    best_q = -1.0
+    quality_log: List[str] = []
+    for i in range(len(masks)):
+        try:
+            s = float(scores[i]) if scores is not None else 0.0
+        except Exception:
+            s = 0.0
+        q = _score_sam_mask(masks[i], s, box_xyxy)
+        quality_log.append(f"mask[{i}] score={s:.3f} quality={q:.3f}")
+        if q > best_q:
+            best_q = q
+            best_i = i
+
+    print(f"[MOTIONCANVAS][SAM] pass1 mask selection: {', '.join(quality_log)} -> mask[{best_i}]", flush=True)
+
+    if best_i is None:
         return None
 
+    mask = _clean_sam_mask(masks[best_i])
     ys, xs = np.where(mask.astype(bool))
     if xs.size == 0 or ys.size == 0:
         return None
 
+    # ---- Pass 2: centroid point + bbox -> refined mask ----
+    # Only run a second pass when pass-1 quality is borderline (below 0.55),
+    # since the extra SAM inference costs ~0.5s and rarely helps for good masks.
+    if best_q < 0.55:
+        print(f"[MOTIONCANVAS][SAM] pass1 quality {best_q:.3f} < 0.55, attempting pass2 refinement", flush=True)
+        cx0 = float(xs.mean())
+        cy0 = float(ys.mean())
+        point_coords = np.array([[cx0, cy0]], dtype=np.float32)
+        point_labels = np.array([1], dtype=np.float32)
+
+        try:
+            masks2, scores2, _ = predictor.predict(
+                point_coords=point_coords,
+                point_labels=point_labels,
+                box=box_xyxy,
+                multimask_output=True,
+            )
+            if masks2 is not None and len(masks2) > 0:
+                best_i2: Optional[int] = None
+                best_q2 = -1.0
+                qlog2: List[str] = []
+                for i in range(len(masks2)):
+                    try:
+                        s = float(scores2[i]) if scores2 is not None else 0.0
+                    except Exception:
+                        s = 0.0
+                    q = _score_sam_mask(masks2[i], s, box_xyxy)
+                    qlog2.append(f"mask[{i}] score={s:.3f} quality={q:.3f}")
+                    if q > best_q2:
+                        best_q2 = q
+                        best_i2 = i
+
+                print(f"[MOTIONCANVAS][SAM] pass2 mask selection: {', '.join(qlog2)} -> mask[{best_i2}]", flush=True)
+
+                if best_i2 is not None:
+                    refined_mask = _clean_sam_mask(masks2[best_i2])
+                    rys, rxs = np.where(refined_mask.astype(bool))
+                    if rxs.size > 0 and rys.size > 0 and best_q2 > best_q:
+                        print(f"[MOTIONCANVAS][SAM] pass2 accepted (quality {best_q:.3f} -> {best_q2:.3f})", flush=True)
+                        mask = refined_mask
+                        ys, xs = rys, rxs
+                    else:
+                        print(f"[MOTIONCANVAS][SAM] pass2 rejected (quality {best_q:.3f} vs {best_q2:.3f})", flush=True)
+        except Exception:
+            pass  # Pass 2 is optional; silently fall back to pass 1.
+
+    # ---- Compute final point from (possibly refined) mask ----
     m = (method or "centroid").strip().lower()
     if m == "top_center":
         y_min = int(ys.min())
