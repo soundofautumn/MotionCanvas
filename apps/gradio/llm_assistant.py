@@ -1379,6 +1379,8 @@ def apply_ops_to_states(
                     continue
                 if not (sf <= fi <= ef):
                     continue
+                if fi == sf:
+                    continue
                 if not isinstance(pts, list):
                     continue
                 new_pts = []
@@ -1834,14 +1836,24 @@ def _apply_tool_calls(
                 [op], bbox_state, point_state, camera_state, num_frames, width, height, bbox_json_text=bbox_json_text, point_json_text=point_json_text, camera_json_text=camera_json_text
             )
             new_point_state = dict(point_state or {})
-            msgs.append("points_translate")
-            _add_result_for(call_id, name, {
-                "ok": True,
-                "applied": "points_translate",
-                "point_frames_before": sorted(list(old_point_state.keys())),
-                "point_frames_after": sorted(list(new_point_state.keys())),
-                "point_json": _point_state_to_json(point_state),
-            })
+            new_point_json = _point_state_to_json(point_state)
+            if not old_point_state:
+                msgs.append("points_translate:no_points")
+                _add_result_for(call_id, name, {
+                    "ok": False,
+                    "error": "no_points",
+                    "hint": "请先调用 gdino_sam_detect_point 或 points_set 设定起始点位置，再调用 points_translate 平移。",
+                    "point_json": new_point_json,
+                })
+            else:
+                msgs.append("points_translate")
+                _add_result_for(call_id, name, {
+                    "ok": True,
+                    "applied": "points_translate",
+                    "point_frames_before": sorted(list(old_point_state.keys())),
+                    "point_frames_after": sorted(list(new_point_state.keys())),
+                    "point_json": new_point_json,
+                })
         elif name == "points_set":
             op = {"op": "points.set", "frame": args.get("frame", 0), "points": args.get("points"), "space": args.get("space", "norm")}
             bbox_state, point_state, camera_state = apply_ops_to_states(
