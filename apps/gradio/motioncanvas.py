@@ -82,6 +82,14 @@ CUSTOM_CSS = """
 
 pipe_state = {"pipe": None, "torch_dtype": None, "loaded_config": None, "cotracker": None}
 
+# ==================== Default Model Paths ====================
+# Change this single variable to update the default paths of ALL models in the GUI.
+MODEL_PATH_PREFIX = "/root/autodl-tmp/models"
+
+
+def _model_path(*parts: str) -> str:
+    return os.path.join(MODEL_PATH_PREFIX, *parts)
+
 DEFAULT_DOWNSAMPLE_RATIOS = [4, 8, 8]
 DEFAULT_POS_EMB_DIM = 16
 
@@ -1371,37 +1379,32 @@ with gr.Blocks(
             with gr.Column(scale=1):
                 dit_path = gr.Textbox(
                     label="DiT 模型路径",
-                    value="/root/autodl-tmp/models/wan_1.3b/"
-                          "diffusion_pytorch_model.safetensors",
+                    value=_model_path("wan_1.3b", "diffusion_pytorch_model.safetensors"),
                 )
                 vae_path = gr.Textbox(
                     label="VAE 模型路径",
-                    value="/root/autodl-tmp/models/wan_1.3b/Wan2.1_VAE.pth",
+                    value=_model_path("wan_1.3b", "Wan2.1_VAE.pth"),
                 )
                 text_encoder_path = gr.Textbox(
                     label="Text Encoder 路径",
-                    value="/root/autodl-tmp/models/wan_1.3b/"
-                          "models_t5_umt5-xxl-enc-bf16.pth",
+                    value=_model_path("wan_1.3b", "models_t5_umt5-xxl-enc-bf16.pth"),
                 )
                 image_encoder_path = gr.Textbox(
                     label="Image Encoder 路径（I2V 可选）",
-                    value="/root/autodl-tmp/models/wan_1.3b/"
-                          "models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth",
+                    value=_model_path("wan_1.3b", "models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth"),
                 )
             with gr.Column(scale=1):
                 motion_controller_path = gr.Textbox(
                     label="Motion Controller 路径（可选）",
-                    value="/root/autodl-tmp/models/DiffSynth-Studio/"
-                          "Wan2.1-1.3b-speedcontrol-v1/model.safetensors",
+                    value=_model_path("DiffSynth-Studio", "Wan2.1-1.3b-speedcontrol-v1", "model.safetensors"),
                 )
                 vace_dir = gr.Textbox(
                     label="VACE 目录（可选）",
-                    value="/root/autodl-tmp/models/iic/"
-                          "VACE-Wan2.1-1.3B-Preview",
+                    value=_model_path("iic", "VACE-Wan2.1-1.3B-Preview"),
                 )
                 checkpoint_path = gr.Textbox(
                     label="MotionCanvas Checkpoint 路径",
-                    value="/root/autodl-tmp/models/motioncanvas/model.pt",
+                    value=_model_path("motioncanvas", "model.pt"),
                 )
                 dtype_choice = gr.Radio(
                     choices=["bfloat16", "float16"], value="bfloat16",
@@ -1581,21 +1584,16 @@ with gr.Blocks(
                                 )
 
                             gr.Markdown("#### SAM（用于点位精修）")
-                            llm_model_path_prefix = gr.Textbox(
-                                label="模型路径前缀",
-                                value="/root/autodl-tmp/models",
-                                placeholder="例如：/root/autodl-tmp/models",
-                            )
                             with gr.Row():
                                 llm_gdino_dir = gr.Textbox(
                                     label="GroundingDINO 模型目录",
-                                    value="/root/autodl-tmp/models/grounding_dino/GroundingDINO",
+                                    value=_model_path("grounding_dino", "GroundingDINO"),
                                     placeholder="例如：/root/autodl-tmp/models/grounding_dino/GroundingDINO",
                                 )
                             with gr.Row():
                                 llm_sam_ckpt = gr.Textbox(
                                     label="SAM checkpoint 路径",
-                                    value="/root/autodl-tmp/models/segment_anything/sam_vit_h_4b8939.pth",
+                                    value=_model_path("segment_anything", "sam_vit_h_4b8939.pth"),
                                     placeholder="例如：/root/autodl-tmp/models/segment_anything/sam_vit_h_4b8939.pth",
                                 )
                                 llm_sam_type = gr.Dropdown(
@@ -1603,21 +1601,6 @@ with gr.Blocks(
                                     choices=["vit_h"],
                                     value="vit_h",
                                 )
-
-                            def _apply_model_prefix(prefix: str):
-                                p = (prefix or "").rstrip("/")
-                                if not p:
-                                    return gr.update(), gr.update()
-                                return (
-                                    gr.update(value=f"{p}/grounding_dino/GroundingDINO"),
-                                    gr.update(value=f"{p}/segment_anything/sam_vit_h_4b8939.pth"),
-                                )
-
-                            llm_model_path_prefix.change(
-                                fn=_apply_model_prefix,
-                                inputs=[llm_model_path_prefix],
-                                outputs=[llm_gdino_dir, llm_sam_ckpt],
-                            )
 
                             llm_send_image = gr.Checkbox(
                                 label="发送起始帧图像给 LLM（多模态，模型需支持 Vision）",
