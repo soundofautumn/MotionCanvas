@@ -1556,6 +1556,9 @@ with gr.Blocks(
                         bbox_kf_state = gr.State({})
                         bbox_editor = gr.ImageEditor(
                             canvas_size=(832, 480),
+                            height=480,
+                            width=832,
+                            fixed_canvas=True,
                             sources=None,
                             layers=False,
                             interactive=True,
@@ -1576,6 +1579,9 @@ with gr.Blocks(
                         point_kf_state = gr.State({})
                         point_editor = gr.ImageEditor(
                             canvas_size=(832, 480),
+                            height=480,
+                            width=832,
+                            fixed_canvas=True,
                             sources=None,
                             layers=False,
                             interactive=True,

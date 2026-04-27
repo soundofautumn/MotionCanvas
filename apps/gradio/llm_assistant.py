@@ -2141,8 +2141,8 @@ def llm_apply_instruction(
         dict(camera_kf_state or {}),
         int(motion_frame_idx),
     )
-    default_bbox_canvas = _editor_canvas_from_input(input_image)
-    default_point_canvas = _editor_canvas_from_input(input_image)
+    default_bbox_canvas = gr.update()
+    default_point_canvas = gr.update()
     if not user_message:
         # 不抛异常，避免输入框进入错误态导致无法继续操作
         return (
@@ -2778,8 +2778,8 @@ def llm_apply_instruction(
 
     # Sync camera sliders + reset editor canvases so motion editor reflects new state immediately.
     cam_zoom_v, cam_pan_x_v, cam_pan_y_v, cam_rot_v = _camera_values_for_frame(new_camera_state, new_frame_val)
-    bbox_canvas_v = _editor_canvas_from_input(input_image)
-    point_canvas_v = _editor_canvas_from_input(input_image)
+    bbox_canvas_v = gr.update()
+    point_canvas_v = gr.update()
 
     return (
         history,
