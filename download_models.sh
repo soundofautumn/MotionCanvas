@@ -155,7 +155,7 @@ echo "[4/7] MotionCanvas 权重下载完成！"
 echo ""
 echo "[5/7] 预下载 GroundingDINO (Transformers) 权重 ..."
 
-GDINO_MS_MODEL="AI-ModelScope/GroundingDINO"
+GDINO_MS_MODEL="IDEA-Research/grounding-dino-base"
 GDINO_DIR="${MODEL_DIR}/grounding_dino/GroundingDINO"
 modelscope download \
     --model "${GDINO_MS_MODEL}" \
