@@ -541,6 +541,16 @@ def extract_points_from_editor(editor_data, max_points=20):
     return points[:max_points]
 
 
+def _preview_image(input_image):
+    """返回缩略图用于预览显示。"""
+    if input_image is None:
+        return None, None
+    canvas_w, canvas_h = 832, 480
+    img = input_image.convert("RGB")
+    img.thumbnail((canvas_w, canvas_h), Image.Resampling.LANCZOS)
+    return img, img
+
+
 def sync_image_to_editors(input_image):
     """将输入图像同步到画布作为背景。"""
     if input_image is None:
@@ -1553,50 +1563,24 @@ with gr.Blocks(
                             )
 
                         gr.Markdown("### 物体运动（Bbox）", elem_classes="section-title")
+                        gr.Markdown("请通过 **LLM 助手** 或下方 **JSON / 高级选项** 手动编辑 bbox 数据。ImageEditor 因 Gradio [#12058](https://github.com/gradio-app/gradio/issues/12058) 已知 bug 暂时禁用。", elem_classes="kf-label")
                         bbox_kf_state = gr.State({})
-                        bbox_editor = gr.ImageEditor(
-                            canvas_size=(832, 480),
-                            height=480,
-                            width=832,
-                            fixed_canvas=True,
-                            sources=None,
-                            layers=False,
-                            interactive=True,
-                            image_mode="RGB",
-                            brush=gr.Brush(
-                                default_size=40,
-                                default_color="#2ecc71",
-                                colors=["#2ecc71"],
-                            ),
-                            eraser=gr.Eraser(default_size=40),
-                            label="在此涂抹标记物体区域（保存为该帧关键帧）",
+                        bbox_preview = gr.Image(
+                            label="起始帧预览",
+                            type="pil",
+                            interactive=False,
+                            height=240,
                         )
-                        with gr.Row():
-                            bbox_save_btn = gr.Button("保存当前帧选区", variant="secondary")
-                            bbox_delete_btn = gr.Button("删除当前帧选区", variant="secondary")
 
                         gr.Markdown("### 局部运动（点轨迹）", elem_classes="section-title")
+                        gr.Markdown("请通过 **LLM 助手** 或下方 **JSON / 高级选项** 手动编辑点轨迹数据。ImageEditor 因 Gradio [#12058](https://github.com/gradio-app/gradio/issues/12058) 已知 bug 暂时禁用。", elem_classes="kf-label")
                         point_kf_state = gr.State({})
-                        point_editor = gr.ImageEditor(
-                            canvas_size=(832, 480),
-                            height=480,
-                            width=832,
-                            fixed_canvas=True,
-                            sources=None,
-                            layers=False,
-                            interactive=True,
-                            image_mode="RGB",
-                            brush=gr.Brush(
-                                default_size=10,
-                                default_color="#ffffff",
-                                colors=["#ffffff"],
-                            ),
-                            eraser=gr.Eraser(default_size=10),
-                            label="在此标记局部点（保存为该帧关键帧）",
+                        point_preview = gr.Image(
+                            label="起始帧预览",
+                            type="pil",
+                            interactive=False,
+                            height=240,
                         )
-                        with gr.Row():
-                            point_save_btn = gr.Button("保存当前帧点", variant="secondary")
-                            point_delete_btn = gr.Button("删除当前帧点", variant="secondary")
 
                         gr.Markdown("### 相机运动", elem_classes="section-title")
                         camera_kf_state = gr.State({})
@@ -1739,15 +1723,15 @@ with gr.Blocks(
     # ---- 事件绑定 ----
 
     input_image.change(
-        fn=sync_image_to_editors,
+        fn=_preview_image,
         inputs=[input_image],
-        outputs=[bbox_editor, point_editor],
+        outputs=[bbox_preview, point_preview],
     )
 
     sync_btn.click(
-        fn=sync_image_to_editors,
+        fn=_preview_image,
         inputs=[input_image],
-        outputs=[bbox_editor, point_editor],
+        outputs=[bbox_preview, point_preview],
     )
 
     # ---- 帧滑条范围随 num_frames 更新 ----
@@ -1758,13 +1742,15 @@ with gr.Blocks(
     )
 
     # ---- 切换帧时，重置画布为输入图像（避免跨帧残留笔迹） ----
-    motion_frame_idx.change(fn=_reset_editor_canvas, inputs=[input_image], outputs=[bbox_editor])
-    motion_frame_idx.change(fn=_reset_editor_canvas, inputs=[input_image], outputs=[point_editor])
+    motion_frame_idx.change(fn=_preview_image, inputs=[input_image], outputs=[bbox_preview])
+    motion_frame_idx.change(fn=_preview_image, inputs=[input_image], outputs=[point_preview])
 
     # ---- Bbox 关键帧保存/删除 ----
+    bbox_save_btn = gr.Button("保存当前帧选区", variant="secondary", visible=False)
+    bbox_delete_btn = gr.Button("删除当前帧选区", variant="secondary", visible=False)
     bbox_save_btn.click(
         fn=save_bbox_keyframe,
-        inputs=[bbox_editor, motion_frame_idx, bbox_kf_state],
+        inputs=[bbox_preview, motion_frame_idx, bbox_kf_state],
         outputs=[bbox_kf_state, bbox_json_text],
     )
     bbox_delete_btn.click(
@@ -1774,9 +1760,11 @@ with gr.Blocks(
     )
 
     # ---- Point 关键帧保存/删除 ----
+    point_save_btn = gr.Button("保存当前帧点", variant="secondary", visible=False)
+    point_delete_btn = gr.Button("删除当前帧点", variant="secondary", visible=False)
     point_save_btn.click(
         fn=save_point_keyframe,
-        inputs=[point_editor, motion_frame_idx, point_kf_state],
+        inputs=[point_preview, motion_frame_idx, point_kf_state],
         outputs=[point_kf_state, point_json_text],
     )
     point_delete_btn.click(
@@ -1887,8 +1875,8 @@ with gr.Blocks(
             camera_pan_x,
             camera_pan_y,
             camera_rotation,
-            bbox_editor,
-            point_editor,
+            bbox_preview,
+            point_preview,
             llm_send_image,
             llm_status,
             llm_user_msg,
@@ -1950,8 +1938,8 @@ with gr.Blocks(
             camera_pan_x,
             camera_pan_y,
             camera_rotation,
-            bbox_editor,
-            point_editor,
+            bbox_preview,
+            point_preview,
             llm_send_image,
             llm_status,
             llm_user_msg,
