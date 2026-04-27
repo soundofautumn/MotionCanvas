@@ -1768,6 +1768,16 @@ def _apply_tool_calls(
             msgs.append(f"unknown_tool:{name}")
             _add_result_for(call_id, name, {"ok": False, "error": f"unknown_tool:{name}"})
 
+    print("\n[MOTIONCANVAS][LLM] tool_results:")
+    for tr in (tool_results or []):
+        try:
+            name = tr.get("name") or ""
+            content = tr.get("content") or ""
+            print(f"  - {name}: {_truncate_for_log(content, limit=2000)}")
+        except Exception:
+            pass
+    print("[MOTIONCANVAS][LLM] tool_results end\n", flush=True)
+
     return bbox_state, point_state, camera_state, prompt, negative_prompt, gen_params, msgs, tool_results, ask_payload
 
 
@@ -2218,7 +2228,14 @@ def llm_apply_instruction(
                         "tool_calls": assistant_msg.get("tool_calls") or tool_calls,
                     }
                 )
+                print("[MOTIONCANVAS][LLM] sending tool results to LLM:", flush=True)
                 for tr in (tool_results or []):
+                    try:
+                        name = tr.get("name") or ""
+                        content = tr.get("content") or ""
+                        print(f"  - {name}: {_truncate_for_log(content, limit=2000)}")
+                    except Exception:
+                        pass
                     messages.append(
                         {
                             "role": "tool",
@@ -2226,6 +2243,7 @@ def llm_apply_instruction(
                             "content": tr.get("content") or "{}",
                         }
                     )
+                print("[MOTIONCANVAS][LLM] sending tool results end\n", flush=True)
             except Exception:
                 tool_role_supported = False
 
