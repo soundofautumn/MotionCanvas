@@ -16,6 +16,7 @@ import base64
 import io
 import json
 import math
+import os
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -165,6 +166,260 @@ def _yolo_best_box(
     return best
 
 
+# ==================== Optional GroundingDINO + SAM ====================
+
+
+_GDINO_PROCESSOR = None
+_GDINO_MODEL = None
+_SAM_PREDICTOR = None
+_SAM_LAST_CKPT = None
+_SAM_LAST_TYPE = None
+
+
+def _get_torch_device() -> str:
+    try:
+        import torch  # type: ignore
+
+        return "cuda" if torch.cuda.is_available() else "cpu"
+    except Exception:
+        return "cpu"
+
+
+def _get_gdino_model_and_processor():
+    """Load GroundingDINO via Hugging Face Transformers (optional dependency).
+
+    Env:
+      - MOTIONCANVAS_GDINO_MODEL_ID (default: IDEA-Research/grounding-dino-base)
+      - MOTIONCANVAS_GDINO_DEVICE (optional: cpu/cuda)
+    """
+
+    global _GDINO_MODEL, _GDINO_PROCESSOR
+    if _GDINO_MODEL is not None and _GDINO_PROCESSOR is not None:
+        return _GDINO_MODEL, _GDINO_PROCESSOR
+
+    try:
+        import torch  # type: ignore
+        from transformers import GroundingDinoForObjectDetection, GroundingDinoProcessor  # type: ignore
+    except Exception as e:
+        raise RuntimeError(
+            "未安装 GroundingDINO 所需依赖（transformers/torch）。\n"
+            "建议在 venv 中安装：/home/qjming/MotionCanvas/.venv/bin/pip install -U torch transformers\n"
+            "（如需 GPU 版 torch 请按你的环境选择正确的安装方式）"
+        ) from e
+
+    model_id = (os.environ.get("MOTIONCANVAS_GDINO_MODEL_ID") or "IDEA-Research/grounding-dino-base").strip()
+    device = (os.environ.get("MOTIONCANVAS_GDINO_DEVICE") or _get_torch_device()).strip()
+
+    processor = GroundingDinoProcessor.from_pretrained(model_id)
+    model = GroundingDinoForObjectDetection.from_pretrained(model_id)
+    model.to(device)
+    model.eval()
+
+    _GDINO_PROCESSOR = processor
+    _GDINO_MODEL = model
+    return model, processor
+
+
+def _gdino_best_box_norm(
+    image: Image.Image,
+    *,
+    query: str,
+    box_threshold: float = 0.3,
+    text_threshold: float = 0.25,
+) -> Optional[Dict[str, Any]]:
+    """Return best matched bbox (norm) for a text query using GroundingDINO.
+
+    Output: {"score": float, "bbox_norm": [x1,y1,x2,y2], "label": str}
+    """
+
+    if image is None:
+        return None
+    q = (query or "").strip()
+    if not q:
+        return None
+
+    model, processor = _get_gdino_model_and_processor()
+    device = next(model.parameters()).device
+
+    # transformers expects text prompt; add punctuation improves grounding for some backends
+    text = q
+    if not text.endswith("."):
+        text = text + "."
+
+    inputs = processor(images=image.convert("RGB"), text=text, return_tensors="pt")
+    inputs = {k: v.to(device) for k, v in inputs.items()}
+
+    try:
+        import torch  # type: ignore
+
+        with torch.no_grad():
+            outputs = model(**inputs)
+    except Exception as e:
+        raise RuntimeError(f"GroundingDINO 推理失败: {e}") from e
+
+    w, h = image.size
+    try:
+        import torch  # type: ignore
+
+        target_sizes = torch.tensor([[int(h), int(w)]], device=device)
+        processed = processor.post_process_grounded_object_detection(
+            outputs,
+            inputs["input_ids"],
+            box_threshold=float(box_threshold),
+            text_threshold=float(text_threshold),
+            target_sizes=target_sizes,
+        )
+    except Exception as e:
+        raise RuntimeError(
+            "GroundingDINO 后处理失败（transformers 版本可能不匹配）。\n"
+            "请尝试升级 transformers：/home/qjming/MotionCanvas/.venv/bin/pip install -U transformers"
+        ) from e
+
+    if not processed:
+        return None
+    p0 = processed[0] or {}
+    boxes = p0.get("boxes")
+    scores = p0.get("scores")
+    labels = p0.get("labels")
+    if boxes is None or scores is None:
+        return None
+
+    best_i = None
+    best_s = -1.0
+    try:
+        n = int(boxes.shape[0])
+    except Exception:
+        n = len(boxes)
+    for i in range(n):
+        try:
+            s = float(scores[i])
+        except Exception:
+            continue
+        if s > best_s:
+            best_s = s
+            best_i = i
+
+    if best_i is None:
+        return None
+
+    try:
+        x1, y1, x2, y2 = [float(v) for v in boxes[best_i].tolist()]
+    except Exception:
+        return None
+
+    bbox_norm = _to_norm_xyxy(x1, y1, x2, y2, w, h)
+    label = ""
+    try:
+        if labels is not None:
+            label = str(labels[best_i])
+    except Exception:
+        label = ""
+
+    return {"score": float(best_s), "bbox_norm": bbox_norm, "label": label}
+
+
+def _get_sam_predictor():
+    """Load SAM predictor (optional dependency).
+
+    Env:
+      - MOTIONCANVAS_SAM_CKPT (required, path to SAM checkpoint)
+      - MOTIONCANVAS_SAM_TYPE (default: vit_h)
+      - MOTIONCANVAS_SAM_DEVICE (optional: cpu/cuda)
+    """
+
+    global _SAM_PREDICTOR
+    if _SAM_PREDICTOR is not None:
+        return _SAM_PREDICTOR
+
+    ckpt = (os.environ.get("MOTIONCANVAS_SAM_CKPT") or "").strip()
+    if not ckpt:
+        raise RuntimeError(
+            "未配置 SAM checkpoint。请设置环境变量 MOTIONCANVAS_SAM_CKPT 为本地权重路径（并重启服务）。"
+        )
+
+    try:
+        import torch  # type: ignore
+        from segment_anything import SamPredictor, sam_model_registry  # type: ignore
+    except Exception as e:
+        raise RuntimeError(
+            "未安装 SAM 依赖（segment-anything）。\n"
+            "你可以从官方仓库安装：pip install git+https://github.com/facebookresearch/segment-anything.git\n"
+            "或者将其加入你的环境后再重试。"
+        ) from e
+
+    sam_type = (os.environ.get("MOTIONCANVAS_SAM_TYPE") or "vit_h").strip()
+    device = (os.environ.get("MOTIONCANVAS_SAM_DEVICE") or _get_torch_device()).strip()
+
+    sam = sam_model_registry[sam_type](checkpoint=ckpt)
+    sam.to(device=device)
+    predictor = SamPredictor(sam)
+    _SAM_PREDICTOR = predictor
+    return predictor
+
+
+def _sam_point_from_box(
+    image: Image.Image,
+    *,
+    box_norm: List[float],
+    method: str = "centroid",
+) -> Optional[List[float]]:
+    """Use SAM to refine a point from a bbox.
+
+    method:
+      - centroid: mask centroid
+      - top_center: top-most row's center x
+    Returns point in norm coords [x,y]
+    """
+
+    if image is None:
+        return None
+    if not isinstance(box_norm, list) or len(box_norm) != 4:
+        return None
+
+    predictor = _get_sam_predictor()
+
+    img = image.convert("RGB")
+    w, h = img.size
+    img_np = np.array(img)
+    predictor.set_image(img_np)
+
+    x1n, y1n, x2n, y2n = [float(v) for v in box_norm]
+    x1 = max(0.0, min(float(w - 1), x1n * float(w)))
+    y1 = max(0.0, min(float(h - 1), y1n * float(h)))
+    x2 = max(0.0, min(float(w - 1), x2n * float(w)))
+    y2 = max(0.0, min(float(h - 1), y2n * float(h)))
+    if x2 <= x1 or y2 <= y1:
+        return None
+
+    box_xyxy = np.array([x1, y1, x2, y2], dtype=np.float32)
+    masks, scores, _ = predictor.predict(box=box_xyxy, multimask_output=True)
+    if masks is None or len(masks) == 0:
+        return None
+
+    best_i = int(np.argmax(scores)) if scores is not None and len(scores) > 0 else 0
+    mask = masks[best_i]
+    if mask is None:
+        return None
+
+    ys, xs = np.where(mask.astype(bool))
+    if xs.size == 0 or ys.size == 0:
+        return None
+
+    m = (method or "centroid").strip().lower()
+    if m == "top_center":
+        y_min = int(ys.min())
+        xs_top = xs[ys == y_min]
+        if xs_top.size == 0:
+            return None
+        cx = float(xs_top.mean())
+        cy = float(y_min)
+    else:
+        cx = float(xs.mean())
+        cy = float(ys.mean())
+
+    return [round(_clamp01(cx / float(w)), 4), round(_clamp01(cy / float(h)), 4)]
+
+
 # ==================== Debug logging ====================
 
 
@@ -255,7 +510,9 @@ LLM_SYSTEM_PROMPT = """你是 MotionCanvas 的“镜头/物体运动控制 + 生
 - 起始帧图像默认不会在每次消息都发送。
 - 如果用户在 UI 勾选了“发送图片”，则本次请求会强制附带一次起始帧图像；发送完成后 UI 会自动取消勾选。
 - 后续如果你仍然需要查看图像，请通过 tools 主动调用 get_input_image 获取压缩后的图像 data_url。
-- 对于“获取物体 bbox/点位”的需求，优先调用 yolo_detect_bbox / yolo_detect_point（服务端会直接在 input_image 上执行，不必把整张图发回模型）。
+- 对于“获取物体 bbox/点位”的需求：
+    - 优先调用 gdino_detect_bbox（用文本描述定位目标框）。
+    - 如果需要更精确的“某个部位点”，优先调用 gdino_sam_detect_point（先用 GroundingDINO 得到框，再用 SAM 分割并从 mask 计算点）。
 
 当你需要用户确认/澄清信息时：
 - 直接调用 ask_user 提出问题（可以给出 choices）。
@@ -1232,36 +1489,39 @@ def get_motion_tools() -> List[Dict[str, Any]]:
             },
         },
 
-        # --- Localization tools (YOLO) ---
+        # --- Localization tools (GroundingDINO + SAM) ---
         {
             "type": "function",
             "function": {
-                "name": "yolo_detect_bbox",
-                "description": "Detect an object bbox on the input image using YOLO (ultralytics) and write it into bbox_json for a target frame.",
+                "name": "gdino_detect_bbox",
+                "description": "Use GroundingDINO to detect a target bbox from text query and write it into bbox_json for a target frame.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "frame": {"type": "integer", "description": "Target frame index. If omitted, use current_frame_idx."},
-                        "class_name": {"type": "string", "description": "Target class name (e.g., person, car). Chinese aliases like '人','汽车' may work for common classes."},
-                        "min_conf": {"type": "number", "description": "Min confidence threshold, default 0.25."},
+                        "query": {"type": "string", "description": "Text query describing the target (e.g., 'a red car', 'the cup', 'logo', 'left headlight')."},
+                        "box_threshold": {"type": "number", "description": "Box threshold, default 0.3."},
+                        "text_threshold": {"type": "number", "description": "Text threshold, default 0.25."},
                     },
-                    "required": [],
+                    "required": ["query"],
                 },
             },
         },
         {
             "type": "function",
             "function": {
-                "name": "yolo_detect_point",
-                "description": "Detect an object bbox on the input image using YOLO and write the bbox center as a point into point_json for a target frame.",
+                "name": "gdino_sam_detect_point",
+                "description": "Use GroundingDINO to get a bbox then SAM to segment and compute a precise point (centroid/top_center) and write it into point_json for a target frame.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "frame": {"type": "integer", "description": "Target frame index. If omitted, use current_frame_idx."},
-                        "class_name": {"type": "string", "description": "Target class name (e.g., person, car)."},
-                        "min_conf": {"type": "number", "description": "Min confidence threshold, default 0.25."},
+                        "query": {"type": "string", "description": "Text query describing the target region/part whose point you want (e.g., 'cup rim', 'car logo', 'left headlight corner')."},
+                        "point_method": {"type": "string", "enum": ["centroid", "top_center"], "description": "How to convert SAM mask to a point. Default centroid."},
+                        "box_threshold": {"type": "number", "description": "DINO box threshold, default 0.3."},
+                        "text_threshold": {"type": "number", "description": "DINO text threshold, default 0.25."},
                     },
-                    "required": [],
+                    "required": ["query"],
                 },
             },
         },
@@ -1481,37 +1741,87 @@ def _apply_tool_calls(
             w, h = input_image.size
             msgs.append(f"get_input_image(max_side={max_side})")
             _add_result_for(call_id, name, {"ok": True, "width": int(w), "height": int(h), "data_url": data_url})
-        elif name in {"yolo_detect_bbox", "yolo_detect_point"}:
+        elif name == "gdino_detect_bbox":
             if input_image is None:
-                raise gr.Error("未提供 input_image，无法执行 YOLO 定位（请上传起始帧图像）")
+                raise gr.Error("未提供 input_image，无法执行 GroundingDINO 定位（请上传起始帧图像）")
 
             f = _cap_frame_local(args.get("frame", None), default_v=int(current_frame_idx))
-            class_name = str(args.get("class_name") or "").strip()
-            min_conf = float(args.get("min_conf", 0.25) or 0.25)
+            query = str(args.get("query") or "").strip()
+            box_th = float(args.get("box_threshold", 0.3) or 0.3)
+            text_th = float(args.get("text_threshold", 0.25) or 0.25)
 
-            det = _yolo_best_box(input_image, class_name=class_name, min_conf=min_conf)
+            det = _gdino_best_box_norm(input_image, query=query, box_threshold=box_th, text_threshold=text_th)
             if not det:
-                # Keep as soft failure (no state change) but reflect in assistant message.
-                label_dbg = class_name if class_name else "<any>"
-                msgs.append(f"{name}:not_found({label_dbg})")
-                _add_result_for(call_id, name, {"ok": True, "found": False, "class_name": class_name, "min_conf": min_conf})
+                msgs.append("gdino_detect_bbox:not_found")
+                _add_result_for(call_id, name, {"ok": True, "found": False, "query": query, "box_threshold": box_th, "text_threshold": text_th})
                 continue
 
-            img_w, img_h = input_image.size
-            x1, y1, x2, y2 = det["xyxy"]
-            bbox_norm = _to_norm_xyxy(x1, y1, x2, y2, img_w, img_h)
+            bbox_norm = det.get("bbox_norm")
+            if not isinstance(bbox_norm, list) or len(bbox_norm) != 4:
+                msgs.append("gdino_detect_bbox:invalid_box")
+                _add_result_for(call_id, name, {"ok": False, "error": "invalid_box", "det": det})
+                continue
 
             fi = str(int(f))
-            if name == "yolo_detect_bbox":
-                bbox_state[fi] = bbox_norm
-                msgs.append(f"yolo_detect_bbox({det.get('label')},conf={float(det.get('conf',0)):.2f},frame={f})")
-                _add_result_for(call_id, name, {"ok": True, "found": True, "frame": int(f), "label": det.get("label"), "conf": float(det.get("conf", 0.0)), "bbox_norm": bbox_norm})
-            else:
-                cx = (bbox_norm[0] + bbox_norm[2]) / 2.0
-                cy = (bbox_norm[1] + bbox_norm[3]) / 2.0
-                point_state[fi] = [[round(_clamp01(cx), 4), round(_clamp01(cy), 4)]]
-                msgs.append(f"yolo_detect_point({det.get('label')},conf={float(det.get('conf',0)):.2f},frame={f})")
-                _add_result_for(call_id, name, {"ok": True, "found": True, "frame": int(f), "label": det.get("label"), "conf": float(det.get("conf", 0.0)), "point_norm": point_state[fi][0], "bbox_norm": bbox_norm})
+            bbox_state[fi] = bbox_norm
+            msgs.append(f"gdino_detect_bbox(score={float(det.get('score',0)):.2f},frame={f})")
+            _add_result_for(call_id, name, {"ok": True, "found": True, "frame": int(f), "query": query, "score": float(det.get("score", 0.0)), "bbox_norm": bbox_norm})
+
+        elif name == "gdino_sam_detect_point":
+            if input_image is None:
+                raise gr.Error("未提供 input_image，无法执行 GroundingDINO+SAM 定位（请上传起始帧图像）")
+
+            f = _cap_frame_local(args.get("frame", None), default_v=int(current_frame_idx))
+            query = str(args.get("query") or "").strip()
+            method = str(args.get("point_method") or "centroid").strip().lower()
+            box_th = float(args.get("box_threshold", 0.3) or 0.3)
+            text_th = float(args.get("text_threshold", 0.25) or 0.25)
+
+            det = _gdino_best_box_norm(input_image, query=query, box_threshold=box_th, text_threshold=text_th)
+            if not det:
+                msgs.append("gdino_sam_detect_point:not_found")
+                _add_result_for(call_id, name, {"ok": True, "found": False, "query": query, "box_threshold": box_th, "text_threshold": text_th})
+                continue
+
+            bbox_norm = det.get("bbox_norm")
+            if not isinstance(bbox_norm, list) or len(bbox_norm) != 4:
+                msgs.append("gdino_sam_detect_point:invalid_box")
+                _add_result_for(call_id, name, {"ok": False, "error": "invalid_box", "det": det})
+                continue
+
+            # Try SAM refinement; if SAM is not configured, fall back to bbox center.
+            point_norm = None
+            sam_used = False
+            try:
+                point_norm = _sam_point_from_box(input_image, box_norm=bbox_norm, method=method)
+                sam_used = point_norm is not None
+            except Exception:
+                point_norm = None
+                sam_used = False
+
+            if point_norm is None:
+                cx = (float(bbox_norm[0]) + float(bbox_norm[2])) / 2.0
+                cy = (float(bbox_norm[1]) + float(bbox_norm[3])) / 2.0
+                point_norm = [round(_clamp01(cx), 4), round(_clamp01(cy), 4)]
+
+            fi = str(int(f))
+            point_state[fi] = [[float(point_norm[0]), float(point_norm[1])]]
+            msgs.append(f"gdino_sam_detect_point(frame={f},sam={sam_used})")
+            _add_result_for(
+                call_id,
+                name,
+                {
+                    "ok": True,
+                    "found": True,
+                    "frame": int(f),
+                    "query": query,
+                    "point_method": method,
+                    "sam_used": bool(sam_used),
+                    "score": float(det.get("score", 0.0)),
+                    "bbox_norm": bbox_norm,
+                    "point_norm": point_state[fi][0],
+                },
+            )
         else:
             msgs.append(f"unknown_tool:{name}")
             _add_result_for(call_id, name, {"ok": False, "error": f"unknown_tool:{name}"})
@@ -1605,6 +1915,8 @@ def llm_apply_instruction(
     llm_api_key,
     llm_model,
     llm_timeout,
+    sam_ckpt,
+    sam_type,
     input_image,
     llm_send_image,
     bbox_json_text,
@@ -1626,6 +1938,20 @@ def llm_apply_instruction(
     camera_kf_state,
 ):
     user_message = (user_message or "").strip()
+
+    # Apply optional SAM configuration from GUI (for gdino_sam_detect_point)
+    global _SAM_PREDICTOR, _SAM_LAST_CKPT, _SAM_LAST_TYPE
+    sam_ckpt_s = (sam_ckpt or "").strip()
+    sam_type_s = (sam_type or "").strip() or "vit_h"
+    if sam_ckpt_s:
+        os.environ["MOTIONCANVAS_SAM_CKPT"] = sam_ckpt_s
+    if sam_type_s:
+        os.environ["MOTIONCANVAS_SAM_TYPE"] = sam_type_s
+    # If user changes ckpt/type, clear cached predictor to reload.
+    if (sam_ckpt_s and sam_ckpt_s != _SAM_LAST_CKPT) or (sam_type_s and sam_type_s != _SAM_LAST_TYPE):
+        _SAM_PREDICTOR = None
+        _SAM_LAST_CKPT = sam_ckpt_s or _SAM_LAST_CKPT
+        _SAM_LAST_TYPE = sam_type_s or _SAM_LAST_TYPE
 
     history = _normalize_chat_history(chat_history)
 

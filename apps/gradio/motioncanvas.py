@@ -1580,6 +1580,19 @@ with gr.Blocks(
                                     5, 180, value=60, step=1, label="请求超时 (秒)"
                                 )
 
+                            gr.Markdown("#### SAM（用于点位精修）")
+                            with gr.Row():
+                                llm_sam_ckpt = gr.Textbox(
+                                    label="SAM checkpoint 路径",
+                                    value="/root/autodl-tmp/models/segment_anything/sam_vit_h_4b8939.pth",
+                                    placeholder="例如：/root/autodl-tmp/models/segment_anything/sam_vit_h_4b8939.pth",
+                                )
+                                llm_sam_type = gr.Dropdown(
+                                    label="SAM 类型",
+                                    choices=["vit_h"],
+                                    value="vit_h",
+                                )
+
                             llm_send_image = gr.Checkbox(
                                 label="发送起始帧图像给 LLM（多模态，模型需支持 Vision）",
                                 value=False,
@@ -1766,6 +1779,8 @@ with gr.Blocks(
             llm_api_key,
             llm_model,
             llm_timeout,
+            llm_sam_ckpt,
+            llm_sam_type,
             input_image,
             llm_send_image,
             bbox_json_text,
@@ -1826,6 +1841,8 @@ with gr.Blocks(
             llm_api_key,
             llm_model,
             llm_timeout,
+            llm_sam_ckpt,
+            llm_sam_type,
             input_image,
             llm_send_image,
             bbox_json_text,

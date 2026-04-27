@@ -1,10 +1,11 @@
 #!/bin/bash
 # MotionCanvas 模型下载脚本
-# 需要下载四类模型：
+# 需要下载五类模型：
 #   1. Wan2.1-Fun-1.3B-InP 基础模型 (~19GB)
 #   2. Wan2.1 1.3B Motion Controller (~几百 MB)
 #   3. Wan2.1 1.3B VACE (~数 GB)
 #   4. MotionCanvas 预训练权重   (~3.1GB)
+#   5. SAM (Segment Anything) checkpoint (~2.6GB)
 #
 # 使用方法:
 #   bash download_models.sh              # 默认从 ModelScope 下载
@@ -40,6 +41,7 @@ mkdir -p "${MODEL_DIR}/wan_1.3b"
 mkdir -p "${MODEL_DIR}/DiffSynth-Studio/Wan2.1-1.3b-speedcontrol-v1"
 mkdir -p "${MODEL_DIR}/iic/VACE-Wan2.1-1.3B-Preview"
 mkdir -p "${MODEL_DIR}/motioncanvas"
+mkdir -p "${MODEL_DIR}/segment_anything"
 
 echo "============================================"
 echo " MotionCanvas 模型下载"
@@ -48,11 +50,28 @@ echo " 保存目录: ${MODEL_DIR}"
 echo " CoTracker 缓存目录: ${COTRACKER_HUB_DIR}"
 echo "============================================"
 
+download_url() {
+    URL="$1"
+    OUT="$2"
+    if [ -f "$OUT" ]; then
+        echo "  ✓ 已存在: $OUT"
+        return 0
+    fi
+    if command -v wget >/dev/null 2>&1; then
+        wget -O "$OUT" "$URL"
+    elif command -v curl >/dev/null 2>&1; then
+        curl -L -o "$OUT" "$URL"
+    else
+        echo "错误: 需要 wget 或 curl 来下载: $URL"
+        exit 1
+    fi
+}
+
 # -----------------------------------------------
 # 1. 下载 Wan2.1-Fun-1.3B-InP 基础模型
 # -----------------------------------------------
 echo ""
-echo "[1/2] 下载 Wan2.1-Fun-1.3B-InP 基础模型 (~19GB) ..."
+echo "[1/6] 下载 Wan2.1-Fun-1.3B-InP 基础模型 (~19GB) ..."
 
 if [ "$SOURCE" = "modelscope" ]; then
     modelscope download \
@@ -67,13 +86,13 @@ else
     exit 1
 fi
 
-echo "[1/2] Wan2.1-Fun-1.3B-InP 下载完成！"
+echo "[1/6] Wan2.1-Fun-1.3B-InP 下载完成！"
 
 # -----------------------------------------------
 # 2. 下载 Wan2.1 1.3B Motion Controller
 # -----------------------------------------------
 echo ""
-echo "[2/4] 下载 Wan2.1 1.3B Motion Controller ..."
+echo "[2/6] 下载 Wan2.1 1.3B Motion Controller ..."
 
 if [ "$SOURCE" = "modelscope" ]; then
     modelscope download \
@@ -86,13 +105,13 @@ elif [ "$SOURCE" = "hf" ]; then
         --local_dir "${MODEL_DIR}/DiffSynth-Studio/Wan2.1-1.3b-speedcontrol-v1"
 fi
 
-echo "[2/4] Wan2.1 1.3B Motion Controller 下载完成！"
+echo "[2/6] Wan2.1 1.3B Motion Controller 下载完成！"
 
 # -----------------------------------------------
 # 3. 下载 Wan2.1 1.3B VACE
 # -----------------------------------------------
 echo ""
-echo "[3/4] 下载 Wan2.1 1.3B VACE ..."
+echo "[3/6] 下载 Wan2.1 1.3B VACE ..."
 
 if [ "$SOURCE" = "modelscope" ]; then
     modelscope download \
@@ -105,13 +124,13 @@ elif [ "$SOURCE" = "hf" ]; then
         --local_dir "${MODEL_DIR}/iic/VACE-Wan2.1-1.3B-Preview"
 fi
 
-echo "[3/4] Wan2.1 1.3B VACE 下载完成！"
+echo "[3/6] Wan2.1 1.3B VACE 下载完成！"
 
 # -----------------------------------------------
 # 4. 下载 MotionCanvas 预训练权重
 # -----------------------------------------------
 echo ""
-echo "[4/4] 下载 MotionCanvas 预训练权重 (~3.1GB) ..."
+echo "[4/6] 下载 MotionCanvas 预训练权重 (~3.1GB) ..."
 
 if [ "$SOURCE" = "modelscope" ]; then
     modelscope download \
@@ -124,13 +143,13 @@ elif [ "$SOURCE" = "hf" ]; then
         --local_dir "${MODEL_DIR}/motioncanvas"
 fi
 
-echo "[4/4] MotionCanvas 权重下载完成！"
+echo "[4/6] MotionCanvas 权重下载完成！"
 
 # -----------------------------------------------
 # 5. 预下载 CoTracker 到本地缓存
 # -----------------------------------------------
 echo ""
-echo "[5/5] 预下载 CoTracker (torch.hub) ..."
+echo "[5/6] 预下载 CoTracker (torch.hub) ..."
 mkdir -p "${COTRACKER_HUB_DIR}"
 python - <<'PY'
 import os
@@ -143,7 +162,20 @@ torch.hub.load("facebookresearch/co-tracker", "cotracker3_offline", trust_repo=T
 print(f"CoTracker cached at {hub_dir}")
 PY
 
-echo "[5/5] CoTracker 预下载完成！"
+echo "[5/6] CoTracker 预下载完成！"
+
+# -----------------------------------------------
+# 6. 下载 SAM (Segment Anything) checkpoint
+# -----------------------------------------------
+echo ""
+echo "[6/6] 下载 SAM (Segment Anything) checkpoint (~2.6GB) ..."
+
+SAM_CKPT_NAME="sam_vit_h_4b8939.pth"
+SAM_CKPT_PATH="${MODEL_DIR}/segment_anything/${SAM_CKPT_NAME}"
+SAM_CKPT_URL="https://dl.fbaipublicfiles.com/segment_anything/${SAM_CKPT_NAME}"
+
+download_url "$SAM_CKPT_URL" "$SAM_CKPT_PATH"
+echo "[6/6] SAM checkpoint 下载完成！"
 
 # -----------------------------------------------
 # 验证文件完整性
@@ -184,6 +216,10 @@ check_file "${MODEL_DIR}/iic/VACE-Wan2.1-1.3B-Preview/Wan2.1_VAE.pth"
 echo ""
 echo "MotionCanvas:"
 check_file "${MODEL_DIR}/motioncanvas/model.pt"
+
+echo ""
+echo "SAM (Segment Anything):"
+check_file "${MODEL_DIR}/segment_anything/sam_vit_h_4b8939.pth"
 
 echo ""
 echo "CoTracker (torch.hub):"
