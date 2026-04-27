@@ -545,12 +545,12 @@ def sync_image_to_editors(input_image):
     """将输入图像同步到画布作为背景。"""
     if input_image is None:
         return None, None
-    # Resize to canvas_size & convert to RGBA so the ImageEditor (image_mode="RGBA")
-    # renders correctly.  Avoiding huge arrays also prevents UI freezes on upload.
+    # Resize to canvas_size so the ImageEditor renders correctly.
+    # Avoiding huge arrays also prevents UI freezes on upload.
     canvas_w, canvas_h = 832, 480
-    img = input_image.convert("RGBA")
+    img = input_image.convert("RGB")
     img.thumbnail((canvas_w, canvas_h), Image.Resampling.LANCZOS)
-    bg = Image.new("RGBA", (canvas_w, canvas_h), (0, 0, 0, 255))
+    bg = Image.new("RGB", (canvas_w, canvas_h), (0, 0, 0))
     bg.paste(img, ((canvas_w - img.width) // 2, (canvas_h - img.height) // 2))
     return np.array(bg), np.array(bg)
 
@@ -1259,9 +1259,9 @@ def _reset_editor_canvas(input_image):
     if input_image is None:
         return None
     canvas_w, canvas_h = 832, 480
-    img = input_image.convert("RGBA")
+    img = input_image.convert("RGB")
     img.thumbnail((canvas_w, canvas_h), Image.Resampling.LANCZOS)
-    bg = Image.new("RGBA", (canvas_w, canvas_h), (0, 0, 0, 255))
+    bg = Image.new("RGB", (canvas_w, canvas_h), (0, 0, 0))
     bg.paste(img, ((canvas_w - img.width) // 2, (canvas_h - img.height) // 2))
     return np.array(bg)
 
@@ -1562,7 +1562,7 @@ with gr.Blocks(
                             sources=None,
                             layers=False,
                             interactive=True,
-                            image_mode="RGBA",
+                            image_mode="RGB",
                             brush=gr.Brush(
                                 default_size=40,
                                 default_color="#2ecc71",
@@ -1585,7 +1585,7 @@ with gr.Blocks(
                             sources=None,
                             layers=False,
                             interactive=True,
-                            image_mode="RGBA",
+                            image_mode="RGB",
                             brush=gr.Brush(
                                 default_size=10,
                                 default_color="#ffffff",
