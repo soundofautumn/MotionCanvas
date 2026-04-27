@@ -160,7 +160,7 @@ def _gdino_best_box_norm(
         processed = processor.post_process_grounded_object_detection(
             outputs,
             inputs["input_ids"],
-            box_threshold=float(box_threshold),
+            threshold=float(box_threshold),
             text_threshold=float(text_threshold),
             target_sizes=target_sizes,
         )
