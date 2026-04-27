@@ -6,7 +6,7 @@
 #   3. Wan2.1 1.3B VACE (~数 GB)
 #   4. MotionCanvas 预训练权重   (~3.1GB)
 #   5. GroundingDINO (Transformers) 权重（会下载较大的 .safetensors）
-#   6. SAM (Segment Anything) checkpoint (~2.6GB)
+#   6. SAM (Segment Anything) checkpoint (~2.6GB)（从 ModelScope 下载）
 #
 # 使用方法:
 #   bash download_models.sh              # 从 ModelScope 下载
@@ -188,12 +188,13 @@ echo "[6/7] CoTracker 预下载完成！"
 echo ""
 echo "[7/7] 下载 SAM (Segment Anything) checkpoint (~2.6GB) ..."
 
+SAM_MS_MODEL="muse/sam_vit_h_4b8939"
+modelscope download \
+    --model "${SAM_MS_MODEL}" \
+    --local_dir "${MODEL_DIR}/segment_anything"
+
 SAM_CKPT_NAME="sam_vit_h_4b8939.pth"
 SAM_CKPT_PATH="${MODEL_DIR}/segment_anything/${SAM_CKPT_NAME}"
-SAM_CKPT_URL="https://dl.fbaipublicfiles.com/segment_anything/${SAM_CKPT_NAME}"
-
-# SAM ViT-H checkpoint is ~2.6GB; set a conservative minimum size to detect partial downloads.
-download_url "$SAM_CKPT_URL" "$SAM_CKPT_PATH" 2000000000
 echo "[7/7] SAM checkpoint 下载完成！"
 
 # -----------------------------------------------
@@ -212,25 +213,6 @@ check_file() {
         echo "  ✓ $1 (${SIZE})"
     else
         echo "  ✗ $1 [缺失]"
-        MISSING=$((MISSING + 1))
-    fi
-}
-
-check_file_min_size() {
-    FILE="$1"
-    MIN_BYTES="$2"
-    if [ -f "$FILE" ]; then
-        SIZE=$(stat -c%s "$FILE" 2>/dev/null || echo 0)
-        if [ "$SIZE" -ge "$MIN_BYTES" ]; then
-            SIZE_H=$(du -h "$FILE" | cut -f1)
-            echo "  ✓ $FILE (${SIZE_H})"
-        else
-            SIZE_H=$(du -h "$FILE" | cut -f1)
-            echo "  ✗ $FILE [体积异常: ${SIZE_H}]"
-            MISSING=$((MISSING + 1))
-        fi
-    else
-        echo "  ✗ $FILE [缺失]"
         MISSING=$((MISSING + 1))
     fi
 }
@@ -267,7 +249,7 @@ fi
 
 echo ""
 echo "SAM (Segment Anything):"
-check_file_min_size "${MODEL_DIR}/segment_anything/sam_vit_h_4b8939.pth" 2000000000
+check_file "${MODEL_DIR}/segment_anything/sam_vit_h_4b8939.pth"
 
 echo ""
 echo "CoTracker (torch.hub):"
