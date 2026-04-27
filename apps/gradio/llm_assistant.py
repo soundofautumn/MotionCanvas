@@ -420,6 +420,52 @@ def _sam_point_from_box(
     return [round(_clamp01(cx / float(w)), 4), round(_clamp01(cy / float(h)), 4)]
 
 
+def llm_preload_localizers(
+    sam_ckpt: str,
+    sam_type: str,
+) -> str:
+    """Preload GroundingDINO + SAM once (best effort) for faster tool usage.
+
+    This is designed to be called by Gradio `app.load(...)`.
+    """
+
+    global _SAM_PREDICTOR, _SAM_LAST_CKPT, _SAM_LAST_TYPE
+
+    sam_ckpt_s = (sam_ckpt or "").strip()
+    sam_type_s = (sam_type or "").strip() or "vit_h"
+    if sam_ckpt_s:
+        os.environ["MOTIONCANVAS_SAM_CKPT"] = sam_ckpt_s
+    if sam_type_s:
+        os.environ["MOTIONCANVAS_SAM_TYPE"] = sam_type_s
+
+    # Prefer local GroundingDINO cache dir if user didn't set model id.
+    if not (os.environ.get("MOTIONCANVAS_GDINO_MODEL_ID") or "").strip():
+        local_gdino_dir = "/root/autodl-tmp/models/grounding_dino/grounding-dino-base"
+        if os.path.isdir(local_gdino_dir):
+            os.environ["MOTIONCANVAS_GDINO_MODEL_ID"] = local_gdino_dir
+
+    parts: List[str] = []
+    try:
+        _get_gdino_model_and_processor()
+        parts.append("✅ GroundingDINO 已加载")
+    except Exception as e:
+        parts.append(f"⚠️ GroundingDINO 加载失败: {e}")
+
+    # If SAM config changed, clear cache then load.
+    if (sam_ckpt_s and sam_ckpt_s != _SAM_LAST_CKPT) or (sam_type_s and sam_type_s != _SAM_LAST_TYPE):
+        _SAM_PREDICTOR = None
+        _SAM_LAST_CKPT = sam_ckpt_s or _SAM_LAST_CKPT
+        _SAM_LAST_TYPE = sam_type_s or _SAM_LAST_TYPE
+
+    try:
+        _get_sam_predictor()
+        parts.append("✅ SAM 已加载")
+    except Exception as e:
+        parts.append(f"⚠️ SAM 加载失败: {e}")
+
+    return " | ".join(parts)
+
+
 # ==================== Debug logging ====================
 
 

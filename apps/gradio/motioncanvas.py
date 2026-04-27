@@ -88,7 +88,7 @@ DEFAULT_POS_EMB_DIM = 16
 
 # ==================== LLM (OpenAI-Compatible) ====================
 
-from apps.gradio.llm_assistant import llm_apply_instruction, llm_clear_chat
+from apps.gradio.llm_assistant import llm_apply_instruction, llm_clear_chat, llm_preload_localizers
 
 
 # ==================== Model Loading ====================
@@ -1410,7 +1410,7 @@ with gr.Blocks(
         with gr.Row():
             load_btn = gr.Button("加载模型", variant="primary", scale=1)
             model_status = gr.Textbox(
-                label="状态", value="尚未加载模型", interactive=False,
+                label="状态", value="启动时将自动加载模型...", interactive=False,
                 elem_classes="status-box", scale=3,
             )
         load_btn.click(
@@ -1898,6 +1898,29 @@ with gr.Blocks(
         fn=llm_clear_chat,
         inputs=[],
         outputs=[llm_chatbot, llm_user_msg],
+    )
+
+    # Preload GroundingDINO + SAM once when the UI loads
+    app.load(
+        fn=llm_preload_localizers,
+        inputs=[llm_sam_ckpt, llm_sam_type],
+        outputs=[llm_status],
+    )
+
+    # Auto load MotionCanvas main models once when the UI loads
+    app.load(
+        fn=load_models,
+        inputs=[
+            dit_path,
+            vae_path,
+            text_encoder_path,
+            image_encoder_path,
+            motion_controller_path,
+            vace_dir,
+            checkpoint_path,
+            dtype_choice,
+        ],
+        outputs=[model_status],
     )
 
     generate_btn.click(
