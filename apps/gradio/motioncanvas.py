@@ -1581,6 +1581,17 @@ with gr.Blocks(
                                 )
 
                             gr.Markdown("#### SAM（用于点位精修）")
+                            llm_model_path_prefix = gr.Textbox(
+                                label="模型路径前缀",
+                                value="/root/autodl-tmp/models",
+                                placeholder="例如：/root/autodl-tmp/models",
+                            )
+                            with gr.Row():
+                                llm_gdino_dir = gr.Textbox(
+                                    label="GroundingDINO 模型目录",
+                                    value="/root/autodl-tmp/models/grounding_dino/GroundingDINO",
+                                    placeholder="例如：/root/autodl-tmp/models/grounding_dino/GroundingDINO",
+                                )
                             with gr.Row():
                                 llm_sam_ckpt = gr.Textbox(
                                     label="SAM checkpoint 路径",
@@ -1592,6 +1603,21 @@ with gr.Blocks(
                                     choices=["vit_h"],
                                     value="vit_h",
                                 )
+
+                            def _apply_model_prefix(prefix: str):
+                                p = (prefix or "").rstrip("/")
+                                if not p:
+                                    return gr.update(), gr.update()
+                                return (
+                                    gr.update(value=f"{p}/grounding_dino/GroundingDINO"),
+                                    gr.update(value=f"{p}/segment_anything/sam_vit_h_4b8939.pth"),
+                                )
+
+                            llm_model_path_prefix.change(
+                                fn=_apply_model_prefix,
+                                inputs=[llm_model_path_prefix],
+                                outputs=[llm_gdino_dir, llm_sam_ckpt],
+                            )
 
                             llm_send_image = gr.Checkbox(
                                 label="发送起始帧图像给 LLM（多模态，模型需支持 Vision）",
@@ -1779,6 +1805,7 @@ with gr.Blocks(
             llm_api_key,
             llm_model,
             llm_timeout,
+            llm_gdino_dir,
             llm_sam_ckpt,
             llm_sam_type,
             input_image,
@@ -1841,6 +1868,7 @@ with gr.Blocks(
             llm_api_key,
             llm_model,
             llm_timeout,
+            llm_gdino_dir,
             llm_sam_ckpt,
             llm_sam_type,
             input_image,
@@ -1903,7 +1931,7 @@ with gr.Blocks(
     # Preload GroundingDINO + SAM once when the UI loads
     app.load(
         fn=llm_preload_localizers,
-        inputs=[llm_sam_ckpt, llm_sam_type],
+        inputs=[llm_gdino_dir, llm_sam_ckpt, llm_sam_type],
         outputs=[llm_status],
     )
 

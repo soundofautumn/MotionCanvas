@@ -9,11 +9,9 @@
 #   6. SAM (Segment Anything) checkpoint (~2.6GB)
 #
 # 使用方法:
-#   bash download_models.sh              # 默认从 ModelScope 下载
-#   bash download_models.sh --source hf  # 从 HuggingFace 下载
+#   bash download_models.sh              # 从 ModelScope 下载
 #
 # 依赖: pip install modelscope   (ModelScope 下载)
-#        pip install huggingface_hub  (HuggingFace 下载)
 
 set -e
 
@@ -23,10 +21,6 @@ COTRACKER_HUB_DIR="/root/autodl-tmp/torch_hub"
 
 while [[ $# -gt 0 ]]; do
     case $1 in
-        --source)
-            SOURCE="$2"
-            shift 2
-            ;;
         --model-dir)
             MODEL_DIR="$2"
             shift 2
@@ -38,11 +32,16 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+if [ "$SOURCE" != "modelscope" ]; then
+    echo "错误: 当前脚本仅支持 ModelScope 下载"
+    exit 1
+fi
+
 mkdir -p "${MODEL_DIR}/wan_1.3b"
 mkdir -p "${MODEL_DIR}/DiffSynth-Studio/Wan2.1-1.3b-speedcontrol-v1"
 mkdir -p "${MODEL_DIR}/iic/VACE-Wan2.1-1.3B-Preview"
 mkdir -p "${MODEL_DIR}/motioncanvas"
-mkdir -p "${MODEL_DIR}/grounding_dino/grounding-dino-base"
+mkdir -p "${MODEL_DIR}/grounding_dino/GroundingDINO"
 mkdir -p "${MODEL_DIR}/segment_anything"
 
 echo "============================================"
@@ -108,18 +107,9 @@ download_url() {
 echo ""
 echo "[1/7] 下载 Wan2.1-Fun-1.3B-InP 基础模型 (~19GB) ..."
 
-if [ "$SOURCE" = "modelscope" ]; then
-    modelscope download \
-        --model PAI/Wan2.1-Fun-1.3B-InP \
-        --local_dir "${MODEL_DIR}/wan_1.3b"
-elif [ "$SOURCE" = "hf" ]; then
-    huggingface-cli download \
-        alibaba-pai/Wan2.1-Fun-1.3B-InP \
-        --local-dir "${MODEL_DIR}/wan_1.3b"
-else
-    echo "错误: 不支持的下载源 '${SOURCE}'，请使用 'modelscope' 或 'hf'"
-    exit 1
-fi
+modelscope download \
+    --model PAI/Wan2.1-Fun-1.3B-InP \
+    --local_dir "${MODEL_DIR}/wan_1.3b"
 
 echo "[1/7] Wan2.1-Fun-1.3B-InP 下载完成！"
 
@@ -129,16 +119,9 @@ echo "[1/7] Wan2.1-Fun-1.3B-InP 下载完成！"
 echo ""
 echo "[2/7] 下载 Wan2.1 1.3B Motion Controller ..."
 
-if [ "$SOURCE" = "modelscope" ]; then
-    modelscope download \
-        --model DiffSynth-Studio/Wan2.1-1.3b-speedcontrol-v1 \
-        --local_dir "${MODEL_DIR}/DiffSynth-Studio/Wan2.1-1.3b-speedcontrol-v1"
-elif [ "$SOURCE" = "hf" ]; then
-    echo "注意: Wan2.1 1.3B Motion Controller 目前按 ModelScope 路径下载，自动切换到 ModelScope..."
-    modelscope download \
-        --model DiffSynth-Studio/Wan2.1-1.3b-speedcontrol-v1 \
-        --local_dir "${MODEL_DIR}/DiffSynth-Studio/Wan2.1-1.3b-speedcontrol-v1"
-fi
+modelscope download \
+    --model DiffSynth-Studio/Wan2.1-1.3b-speedcontrol-v1 \
+    --local_dir "${MODEL_DIR}/DiffSynth-Studio/Wan2.1-1.3b-speedcontrol-v1"
 
 echo "[2/7] Wan2.1 1.3B Motion Controller 下载完成！"
 
@@ -148,16 +131,9 @@ echo "[2/7] Wan2.1 1.3B Motion Controller 下载完成！"
 echo ""
 echo "[3/7] 下载 Wan2.1 1.3B VACE ..."
 
-if [ "$SOURCE" = "modelscope" ]; then
-    modelscope download \
-        --model iic/VACE-Wan2.1-1.3B-Preview \
-        --local_dir "${MODEL_DIR}/iic/VACE-Wan2.1-1.3B-Preview"
-elif [ "$SOURCE" = "hf" ]; then
-    echo "注意: Wan2.1 1.3B VACE 目前按 ModelScope 路径下载，自动切换到 ModelScope..."
-    modelscope download \
-        --model iic/VACE-Wan2.1-1.3B-Preview \
-        --local_dir "${MODEL_DIR}/iic/VACE-Wan2.1-1.3B-Preview"
-fi
+modelscope download \
+    --model iic/VACE-Wan2.1-1.3B-Preview \
+    --local_dir "${MODEL_DIR}/iic/VACE-Wan2.1-1.3B-Preview"
 
 echo "[3/7] Wan2.1 1.3B VACE 下载完成！"
 
@@ -167,16 +143,9 @@ echo "[3/7] Wan2.1 1.3B VACE 下载完成！"
 echo ""
 echo "[4/7] 下载 MotionCanvas 预训练权重 (~3.1GB) ..."
 
-if [ "$SOURCE" = "modelscope" ]; then
-    modelscope download \
-        --model doubiiu/MotionCanvas \
-        --local_dir "${MODEL_DIR}/motioncanvas"
-elif [ "$SOURCE" = "hf" ]; then
-    echo "注意: MotionCanvas 权重仅在 ModelScope 提供，自动切换到 ModelScope 下载..."
-    modelscope download \
-        --model doubiiu/MotionCanvas \
-        --local_dir "${MODEL_DIR}/motioncanvas"
-fi
+modelscope download \
+    --model doubiiu/MotionCanvas \
+    --local_dir "${MODEL_DIR}/motioncanvas"
 
 echo "[4/7] MotionCanvas 权重下载完成！"
 
@@ -186,26 +155,11 @@ echo "[4/7] MotionCanvas 权重下载完成！"
 echo ""
 echo "[5/7] 预下载 GroundingDINO (Transformers) 权重 ..."
 
-GDINO_REPO="IDEA-Research/grounding-dino-base"
-GDINO_DIR="${MODEL_DIR}/grounding_dino/grounding-dino-base"
-
-if command -v huggingface-cli >/dev/null 2>&1; then
-    huggingface-cli download "$GDINO_REPO" \
-        --local-dir "$GDINO_DIR" \
-        --local-dir-use-symlinks False
-else
-    # Fallback to python huggingface_hub
-    python - <<'PY'
-import os
-from huggingface_hub import snapshot_download
-
-repo_id = os.environ.get("GDINO_REPO") or "IDEA-Research/grounding-dino-base"
-local_dir = os.environ.get("GDINO_DIR") or "/root/autodl-tmp/models/grounding_dino/grounding-dino-base"
-os.makedirs(local_dir, exist_ok=True)
-snapshot_download(repo_id=repo_id, local_dir=local_dir, local_dir_use_symlinks=False)
-print(f"GroundingDINO cached at {local_dir}")
-PY
-fi
+GDINO_MS_MODEL="AI-ModelScope/GroundingDINO"
+GDINO_DIR="${MODEL_DIR}/grounding_dino/GroundingDINO"
+modelscope download \
+    --model "${GDINO_MS_MODEL}" \
+    --local_dir "$GDINO_DIR"
 
 echo "[5/7] GroundingDINO 权重已缓存到本地：${GDINO_DIR}"
 
@@ -303,13 +257,11 @@ check_file "${MODEL_DIR}/motioncanvas/model.pt"
 
 echo ""
 echo "GroundingDINO (Transformers):"
-# At least one of these should exist after download
-if [ -f "${MODEL_DIR}/grounding_dino/grounding-dino-base/model.safetensors" ]; then
-    check_file "${MODEL_DIR}/grounding_dino/grounding-dino-base/model.safetensors"
-elif [ -f "${MODEL_DIR}/grounding_dino/grounding-dino-base/pytorch_model.bin" ]; then
-    check_file "${MODEL_DIR}/grounding_dino/grounding-dino-base/pytorch_model.bin"
+GDINO_ANY=$(find "${MODEL_DIR}/grounding_dino/GroundingDINO" -maxdepth 5 -type f \( -name "*.safetensors" -o -name "pytorch_model.bin" -o -name "model.safetensors" \) 2>/dev/null | head -n 1)
+if [ -n "${GDINO_ANY}" ]; then
+    echo "  ✓ ${MODEL_DIR}/grounding_dino/GroundingDINO (found: $(basename "${GDINO_ANY}"))"
 else
-    echo "  ✗ ${MODEL_DIR}/grounding_dino/grounding-dino-base/(model.safetensors|pytorch_model.bin) [缺失]"
+    echo "  ✗ ${MODEL_DIR}/grounding_dino/GroundingDINO [缺失或为空]"
     MISSING=$((MISSING + 1))
 fi
 

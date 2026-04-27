@@ -25,72 +25,6 @@ import numpy as np
 from PIL import Image
 
 
-# ==================== Optional YOLO (ultralytics) ====================
-
-
-_YOLO_MODEL = None
-
-
-def _normalize_class_name(name: Any) -> str:
-    s = ("" if name is None else str(name)).strip().lower()
-    if not s:
-        return ""
-
-    # Minimal zh->en mapping for common COCO-ish classes.
-    zh_map = {
-        "人": "person",
-        "人物": "person",
-        "行人": "person",
-        "汽车": "car",
-        "车": "car",
-        "小汽车": "car",
-        "公交车": "bus",
-        "大巴": "bus",
-        "卡车": "truck",
-        "货车": "truck",
-        "摩托车": "motorcycle",
-        "自行车": "bicycle",
-        "狗": "dog",
-        "猫": "cat",
-        "鸟": "bird",
-        "马": "horse",
-        "羊": "sheep",
-        "牛": "cow",
-        "椅子": "chair",
-        "沙发": "couch",
-        "杯子": "cup",
-        "手机": "cell phone",
-        "笔记本": "laptop",
-    }
-    return zh_map.get(s, s)
-
-
-def _get_yolo_model():
-    """Lazily load a YOLO model (ultralytics).
-
-    Uses env var MOTIONCANVAS_YOLO_WEIGHTS if provided, otherwise defaults to
-    a common pretrained weight name (ultralytics will download if missing).
-    """
-
-    global _YOLO_MODEL
-    if _YOLO_MODEL is not None:
-        return _YOLO_MODEL
-
-    try:
-        from ultralytics import YOLO  # type: ignore
-    except Exception as e:
-        raise RuntimeError(
-            "未安装 ultralytics（YOLO）。请先在当前环境安装：pip install ultralytics\n"
-            "或者在仓库根目录的 venv 中运行：/home/qjming/MotionCanvas/.venv/bin/pip install ultralytics"
-        ) from e
-
-    import os
-
-    weights = (os.environ.get("MOTIONCANVAS_YOLO_WEIGHTS") or "yolov8n.pt").strip()
-    _YOLO_MODEL = YOLO(weights)
-    return _YOLO_MODEL
-
-
 def _to_norm_xyxy(x1: float, y1: float, x2: float, y2: float, w: int, h: int) -> List[float]:
     w = max(1, int(w))
     h = max(1, int(h))
@@ -105,75 +39,18 @@ def _to_norm_xyxy(x1: float, y1: float, x2: float, y2: float, w: int, h: int) ->
     return [round(x1n, 4), round(y1n, 4), round(x2n, 4), round(y2n, 4)]
 
 
-def _yolo_best_box(
-    image: Image.Image,
-    *,
-    class_name: str = "",
-    min_conf: float = 0.25,
-) -> Optional[Dict[str, Any]]:
-    """Return best detection box for a given class (or best overall).
-
-    Output: {"label": str, "conf": float, "xyxy": [x1,y1,x2,y2]}
-    All xyxy in pixel coordinates of the provided PIL image.
-    """
-
-    if image is None:
-        return None
-
-    model = _get_yolo_model()
-    img = image.convert("RGB")
-
-    # ultralytics returns a list[Results]
-    results = model.predict(img, verbose=False)
-    if not results:
-        return None
-    r0 = results[0]
-
-    boxes = getattr(r0, "boxes", None)
-    if boxes is None:
-        return None
-
-    names = getattr(r0, "names", {}) or {}
-
-    target = _normalize_class_name(class_name)
-    best = None
-    best_conf = -1.0
-    try:
-        xyxy = boxes.xyxy
-        conf = boxes.conf
-        cls = boxes.cls
-    except Exception:
-        return None
-
-    n = int(getattr(boxes, "shape", [len(xyxy)])[0] if hasattr(boxes, "shape") else len(xyxy))
-    for i in range(n):
-        try:
-            c = float(conf[i])
-            if c < float(min_conf):
-                continue
-            cls_id = int(cls[i])
-            label = str(names.get(cls_id, cls_id))
-            if target and _normalize_class_name(label) != target:
-                continue
-            x1, y1, x2, y2 = [float(v) for v in xyxy[i].tolist()]
-        except Exception:
-            continue
-
-        if c > best_conf:
-            best_conf = c
-            best = {"label": label, "conf": c, "xyxy": [x1, y1, x2, y2]}
-
-    return best
-
-
 # ==================== Optional GroundingDINO + SAM ====================
 
 
 _GDINO_PROCESSOR = None
 _GDINO_MODEL = None
+_GDINO_LAST_MODEL_ID = None
+_GDINO_MODEL_ID_OVERRIDE = None
 _SAM_PREDICTOR = None
 _SAM_LAST_CKPT = None
 _SAM_LAST_TYPE = None
+_SAM_CKPT_OVERRIDE = None
+_SAM_TYPE_OVERRIDE = None
 
 
 def _get_torch_device() -> str:
@@ -188,9 +65,7 @@ def _get_torch_device() -> str:
 def _get_gdino_model_and_processor():
     """Load GroundingDINO via Hugging Face Transformers (optional dependency).
 
-    Env:
-      - MOTIONCANVAS_GDINO_MODEL_ID (default: IDEA-Research/grounding-dino-base)
-      - MOTIONCANVAS_GDINO_DEVICE (optional: cpu/cuda)
+    Model path is configured by GUI (no env vars).
     """
 
     global _GDINO_MODEL, _GDINO_PROCESSOR
@@ -207,8 +82,28 @@ def _get_gdino_model_and_processor():
             "（如需 GPU 版 torch 请按你的环境选择正确的安装方式）"
         ) from e
 
-    model_id = (os.environ.get("MOTIONCANVAS_GDINO_MODEL_ID") or "IDEA-Research/grounding-dino-base").strip()
-    device = (os.environ.get("MOTIONCANVAS_GDINO_DEVICE") or _get_torch_device()).strip()
+    model_id = (_GDINO_MODEL_ID_OVERRIDE or "").strip() if _GDINO_MODEL_ID_OVERRIDE is not None else ""
+    if not model_id:
+        local_candidates = [
+            "/root/autodl-tmp/models/grounding_dino/GroundingDINO",
+            "/root/autodl-tmp/models/grounding_dino/grounding-dino-base",
+        ]
+        for p in local_candidates:
+            try:
+                if os.path.isdir(p):
+                    model_id = p
+                    break
+            except Exception:
+                continue
+
+    # To avoid unexpected network downloads, require a local directory.
+    if not model_id or not os.path.isdir(model_id):
+        raise RuntimeError(
+            "未配置或未找到 GroundingDINO 模型目录。\n"
+            "请先运行 download_models.sh 下载模型，然后在 GUI 里填写 GroundingDINO 模型目录路径。"
+        )
+
+    device = _get_torch_device()
 
     processor = GroundingDinoProcessor.from_pretrained(model_id)
     model = GroundingDinoForObjectDetection.from_pretrained(model_id)
@@ -321,21 +216,20 @@ def _gdino_best_box_norm(
 def _get_sam_predictor():
     """Load SAM predictor (optional dependency).
 
-    Env:
-      - MOTIONCANVAS_SAM_CKPT (required, path to SAM checkpoint)
-      - MOTIONCANVAS_SAM_TYPE (default: vit_h)
-      - MOTIONCANVAS_SAM_DEVICE (optional: cpu/cuda)
+    Model path is configured by GUI (no env vars).
     """
 
     global _SAM_PREDICTOR
     if _SAM_PREDICTOR is not None:
         return _SAM_PREDICTOR
 
-    ckpt = (os.environ.get("MOTIONCANVAS_SAM_CKPT") or "").strip()
+    ckpt = (_SAM_CKPT_OVERRIDE or "").strip() if _SAM_CKPT_OVERRIDE is not None else ""
     if not ckpt:
         raise RuntimeError(
-            "未配置 SAM checkpoint。请设置环境变量 MOTIONCANVAS_SAM_CKPT 为本地权重路径（并重启服务）。"
+            "未配置 SAM checkpoint。请在 GUI（LLM 助手）里填写 SAM checkpoint 路径。"
         )
+    if not os.path.isfile(ckpt):
+        raise RuntimeError(f"SAM checkpoint 文件不存在: {ckpt}")
 
     try:
         import torch  # type: ignore
@@ -347,8 +241,8 @@ def _get_sam_predictor():
             "或者将其加入你的环境后再重试。"
         ) from e
 
-    sam_type = (os.environ.get("MOTIONCANVAS_SAM_TYPE") or "vit_h").strip()
-    device = (os.environ.get("MOTIONCANVAS_SAM_DEVICE") or _get_torch_device()).strip()
+    sam_type = ((_SAM_TYPE_OVERRIDE or "").strip() if _SAM_TYPE_OVERRIDE is not None else "") or "vit_h"
+    device = _get_torch_device()
 
     sam = sam_model_registry[sam_type](checkpoint=ckpt)
     sam.to(device=device)
@@ -421,6 +315,7 @@ def _sam_point_from_box(
 
 
 def llm_preload_localizers(
+    gdino_model_dir: str,
     sam_ckpt: str,
     sam_type: str,
 ) -> str:
@@ -429,20 +324,27 @@ def llm_preload_localizers(
     This is designed to be called by Gradio `app.load(...)`.
     """
 
-    global _SAM_PREDICTOR, _SAM_LAST_CKPT, _SAM_LAST_TYPE
+    global _GDINO_MODEL, _GDINO_PROCESSOR, _GDINO_LAST_MODEL_ID, _GDINO_MODEL_ID_OVERRIDE
+    global _SAM_PREDICTOR, _SAM_LAST_CKPT, _SAM_LAST_TYPE, _SAM_CKPT_OVERRIDE, _SAM_TYPE_OVERRIDE
 
+    gdino_model_dir_s = (gdino_model_dir or "").strip()
     sam_ckpt_s = (sam_ckpt or "").strip()
     sam_type_s = (sam_type or "").strip() or "vit_h"
-    if sam_ckpt_s:
-        os.environ["MOTIONCANVAS_SAM_CKPT"] = sam_ckpt_s
-    if sam_type_s:
-        os.environ["MOTIONCANVAS_SAM_TYPE"] = sam_type_s
 
-    # Prefer local GroundingDINO cache dir if user didn't set model id.
-    if not (os.environ.get("MOTIONCANVAS_GDINO_MODEL_ID") or "").strip():
-        local_gdino_dir = "/root/autodl-tmp/models/grounding_dino/grounding-dino-base"
-        if os.path.isdir(local_gdino_dir):
-            os.environ["MOTIONCANVAS_GDINO_MODEL_ID"] = local_gdino_dir
+    # Update GroundingDINO config; clear cache if changed.
+    if gdino_model_dir_s != (_GDINO_LAST_MODEL_ID or ""):
+        _GDINO_MODEL_ID_OVERRIDE = gdino_model_dir_s
+        _GDINO_MODEL = None
+        _GDINO_PROCESSOR = None
+        _GDINO_LAST_MODEL_ID = gdino_model_dir_s
+
+    # Update SAM config; clear predictor if changed.
+    if sam_ckpt_s != (_SAM_LAST_CKPT or "") or sam_type_s != (_SAM_LAST_TYPE or ""):
+        _SAM_CKPT_OVERRIDE = sam_ckpt_s
+        _SAM_TYPE_OVERRIDE = sam_type_s
+        _SAM_PREDICTOR = None
+        _SAM_LAST_CKPT = sam_ckpt_s
+        _SAM_LAST_TYPE = sam_type_s
 
     parts: List[str] = []
     try:
@@ -450,12 +352,6 @@ def llm_preload_localizers(
         parts.append("✅ GroundingDINO 已加载")
     except Exception as e:
         parts.append(f"⚠️ GroundingDINO 加载失败: {e}")
-
-    # If SAM config changed, clear cache then load.
-    if (sam_ckpt_s and sam_ckpt_s != _SAM_LAST_CKPT) or (sam_type_s and sam_type_s != _SAM_LAST_TYPE):
-        _SAM_PREDICTOR = None
-        _SAM_LAST_CKPT = sam_ckpt_s or _SAM_LAST_CKPT
-        _SAM_LAST_TYPE = sam_type_s or _SAM_LAST_TYPE
 
     try:
         _get_sam_predictor()
@@ -1961,6 +1857,7 @@ def llm_apply_instruction(
     llm_api_key,
     llm_model,
     llm_timeout,
+    gdino_model_dir,
     sam_ckpt,
     sam_type,
     input_image,
@@ -1985,19 +1882,12 @@ def llm_apply_instruction(
 ):
     user_message = (user_message or "").strip()
 
-    # Apply optional SAM configuration from GUI (for gdino_sam_detect_point)
-    global _SAM_PREDICTOR, _SAM_LAST_CKPT, _SAM_LAST_TYPE
-    sam_ckpt_s = (sam_ckpt or "").strip()
-    sam_type_s = (sam_type or "").strip() or "vit_h"
-    if sam_ckpt_s:
-        os.environ["MOTIONCANVAS_SAM_CKPT"] = sam_ckpt_s
-    if sam_type_s:
-        os.environ["MOTIONCANVAS_SAM_TYPE"] = sam_type_s
-    # If user changes ckpt/type, clear cached predictor to reload.
-    if (sam_ckpt_s and sam_ckpt_s != _SAM_LAST_CKPT) or (sam_type_s and sam_type_s != _SAM_LAST_TYPE):
-        _SAM_PREDICTOR = None
-        _SAM_LAST_CKPT = sam_ckpt_s or _SAM_LAST_CKPT
-        _SAM_LAST_TYPE = sam_type_s or _SAM_LAST_TYPE
+    # Apply localizer configuration from GUI (no env vars)
+    llm_preload_localizers(
+        gdino_model_dir=str(gdino_model_dir or ""),
+        sam_ckpt=str(sam_ckpt or ""),
+        sam_type=str(sam_type or ""),
+    )
 
     history = _normalize_chat_history(chat_history)
 
