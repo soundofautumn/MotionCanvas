@@ -1359,6 +1359,19 @@ def apply_ops_to_states(
                     point_state[fi_str] = new_pts
                 continue
 
+            # ---- Step mode: shift all points in [sf, ef] by dx/dy ----
+            # Also create start/end keyframes so the trajectory has at least
+            # two anchored frames for interpolation downstream.
+            existing_frames = {str(int(k)) for k in (point_state or {}).keys()}
+            sfi, efi = str(int(sf)), str(int(ef))
+            base_start = _interp_points_norm_for_frame(point_state, sf)
+            base_end = _interp_points_norm_for_frame(point_state, ef)
+            if base_start is not None and sfi not in existing_frames:
+                point_state[sfi] = [[round(_clamp01(float(xy[0])), 4), round(_clamp01(float(xy[1])), 4)] for xy in base_start]
+            if base_end is not None and efi not in existing_frames:
+                shifted_end = [[round(_clamp01(float(xy[0]) + dx), 4), round(_clamp01(float(xy[1]) + dy), 4)] for xy in base_end]
+                point_state[efi] = shifted_end
+
             for fi_str, pts in list(point_state.items()):
                 try:
                     fi = int(fi_str)
@@ -1798,28 +1811,48 @@ def _apply_tool_calls(
                 [op], bbox_state, point_state, camera_state, num_frames, width, height, bbox_json_text=bbox_json_text, point_json_text=point_json_text, camera_json_text=camera_json_text
             )
             msgs.append("bbox_translate")
-            _add_result_for(call_id, name, {"ok": True, "applied": "bbox_translate"})
+            _add_result_for(call_id, name, {
+                "ok": True,
+                "applied": "bbox_translate",
+                "bbox_json": _bbox_state_to_json(bbox_state),
+            })
         elif name == "bbox_set":
             op = {"op": "bbox.set", "frame": args.get("frame", 0), "bbox": args.get("bbox"), "space": args.get("space", "norm")}
             bbox_state, point_state, camera_state = apply_ops_to_states(
                 [op], bbox_state, point_state, camera_state, num_frames, width, height, bbox_json_text=bbox_json_text, point_json_text=point_json_text, camera_json_text=camera_json_text
             )
             msgs.append("bbox_set")
-            _add_result_for(call_id, name, {"ok": True, "applied": "bbox_set"})
+            _add_result_for(call_id, name, {
+                "ok": True,
+                "applied": "bbox_set",
+                "bbox_json": _bbox_state_to_json(bbox_state),
+            })
         elif name == "points_translate":
             op = {"op": "points.translate", **args}
+            old_point_state = dict(point_state or {})
             bbox_state, point_state, camera_state = apply_ops_to_states(
                 [op], bbox_state, point_state, camera_state, num_frames, width, height, bbox_json_text=bbox_json_text, point_json_text=point_json_text, camera_json_text=camera_json_text
             )
+            new_point_state = dict(point_state or {})
             msgs.append("points_translate")
-            _add_result_for(call_id, name, {"ok": True, "applied": "points_translate"})
+            _add_result_for(call_id, name, {
+                "ok": True,
+                "applied": "points_translate",
+                "point_frames_before": sorted(list(old_point_state.keys())),
+                "point_frames_after": sorted(list(new_point_state.keys())),
+                "point_json": _point_state_to_json(point_state),
+            })
         elif name == "points_set":
             op = {"op": "points.set", "frame": args.get("frame", 0), "points": args.get("points"), "space": args.get("space", "norm")}
             bbox_state, point_state, camera_state = apply_ops_to_states(
                 [op], bbox_state, point_state, camera_state, num_frames, width, height, bbox_json_text=bbox_json_text, point_json_text=point_json_text, camera_json_text=camera_json_text
             )
             msgs.append("points_set")
-            _add_result_for(call_id, name, {"ok": True, "applied": "points_set"})
+            _add_result_for(call_id, name, {
+                "ok": True,
+                "applied": "points_set",
+                "point_json": _point_state_to_json(point_state),
+            })
         elif name == "set_generation_params":
             # Only update fields that exist
             if isinstance(args, dict):
@@ -1931,6 +1964,7 @@ def _apply_tool_calls(
                     "score": float(det.get("score", 0.0)),
                     "bbox_norm": bbox_norm,
                     "point_norm": point_state[fi][0],
+                    "point_json": _point_state_to_json(point_state),
                 },
             )
         else:
@@ -2602,6 +2636,9 @@ def llm_apply_instruction(
                 updates = obj.get("updates", {}) if isinstance(obj, dict) else {}
                 ops = obj.get("ops", []) if isinstance(obj, dict) else []
                 assistant_msg = obj.get("assistant_message") if isinstance(obj, dict) else None
+                new_bbox_state = base_bbox_state
+                new_point_state = base_point_state
+                new_camera_state = base_camera_state
 
             # Apply ops first
             if ops and isinstance(ops, list):
