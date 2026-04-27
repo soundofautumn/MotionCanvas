@@ -545,8 +545,14 @@ def sync_image_to_editors(input_image):
     """将输入图像同步到画布作为背景。"""
     if input_image is None:
         return None, None
-    img = np.array(input_image)
-    return img, img
+    # Resize to canvas_size & convert to RGBA so the ImageEditor (image_mode="RGBA")
+    # renders correctly.  Avoiding huge arrays also prevents UI freezes on upload.
+    canvas_w, canvas_h = 832, 480
+    img = input_image.convert("RGBA")
+    img.thumbnail((canvas_w, canvas_h), Image.Resampling.LANCZOS)
+    bg = Image.new("RGBA", (canvas_w, canvas_h), (0, 0, 0, 255))
+    bg.paste(img, ((canvas_w - img.width) // 2, (canvas_h - img.height) // 2))
+    return np.array(bg), np.array(bg)
 
 
 def _frame_slider_updates(num_frames):
@@ -1252,7 +1258,12 @@ def build_point_masks_from_tracks(point_tracks, num_frames, height, width, radiu
 def _reset_editor_canvas(input_image):
     if input_image is None:
         return None
-    return np.array(input_image)
+    canvas_w, canvas_h = 832, 480
+    img = input_image.convert("RGBA")
+    img.thumbnail((canvas_w, canvas_h), Image.Resampling.LANCZOS)
+    bg = Image.new("RGBA", (canvas_w, canvas_h), (0, 0, 0, 255))
+    bg.paste(img, ((canvas_w - img.width) // 2, (canvas_h - img.height) // 2))
+    return np.array(bg)
 
 
 
