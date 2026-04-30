@@ -2832,10 +2832,13 @@ def llm_apply_instruction(
             "",
         )
 
+    if not new_bbox_state:
+        new_bbox_state = {"0": [0.0, 0.0, 1.0, 1.0]}
+        new_bbox_json = _bbox_state_to_json(new_bbox_state)
+
     if assistant_msg is not None and str(assistant_msg).strip() != "":
         msg = str(assistant_msg).strip()
     else:
-        # 如果模型没提供 assistant_message，就把原始 content（截断+脱敏）展示出来，避免永远只有“✅ 已应用更新”
         raw_s = _redact_data_urls(_truncate_for_log(raw_content, limit=800)).strip()
         msg = raw_s if raw_s else "✅ 已应用更新"
 

@@ -1429,41 +1429,11 @@ def generate_video(
                 f"track_video generated: shape={tuple(track_video.shape)}, dtype={track_video.dtype}, device={track_video.device}"
             )
 
-    if track_video is None and bbox_mask is None:
-        try:
-            camera_params = build_camera_params_from_json(camera_json_text, int(num_frames))
-            if camera_params is None:
-                camera_params = [
-                    {"zoom": 1.0, "pan_x": 0.0, "pan_y": 0.0, "rotation": 0.0}
-                    for _ in range(int(num_frames))
-                ]
-            background_tracks = generate_background_tracks(
-            camera_params, int(num_frames), int(height), int(width),
-            bbox_mask=bbox_mask,
+    if bbox_mask is None and track_video is None:
+        raise gr.Error(
+            "必须提供 bbox 控制（物体全局运动）才能生成视频。\n"
+            "请通过 LLM 助手或手动编辑添加至少一个 bbox 关键帧。"
         )
-            local_tracks = build_point_tracks_from_json(point_json_text, int(num_frames), int(height), int(width))
-            camera_applied_tracks = []
-            if local_tracks is not None:
-                for track in local_tracks:
-                    cam_track = []
-                    for f, (x, y) in enumerate(track):
-                        params = camera_params[f]
-                        tx, ty = apply_camera_transform_to_point(
-                            x, y, int(width), int(height),
-                            params["zoom"], params["pan_x"], params["pan_y"], params["rotation"],
-                        )
-                        cam_track.append((tx, ty))
-                    camera_applied_tracks.append(cam_track)
-            all_tracks = background_tracks + camera_applied_tracks
-            if all_tracks:
-                track_video = build_track_video_from_tracks(all_tracks, int(num_frames), int(height), int(width))
-                if track_video is not None:
-                    track_video = track_video.to(dtype=torch_dtype, device=device)
-            debug_lines.append(
-                f"track_video from JSON: {'ok' if track_video is not None else 'none'}"
-            )
-        except Exception as e:
-            raise gr.Error(f"Track video 生成失败（无 bbox，仅点/相机轨迹）: {e}")
 
     # 构建管道参数
     pipeline_kwargs = {
