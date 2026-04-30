@@ -548,6 +548,15 @@ def _redact_data_urls(text: str) -> str:
     return re.sub(r"data:image\/[^;]+;base64,[A-Za-z0-9+/=]+", "data:image/<redacted>;base64,<redacted>", text)
 
 
+def _parse_json_for_log(value: str) -> Any:
+    if not value or not str(value).strip():
+        return ""
+    try:
+        return json.loads(value)
+    except Exception:
+        return value
+
+
 def _print_llm_debug(resp: Dict[str, Any]) -> None:
     try:
         msg = ((resp or {}).get("choices") or [{}])[0].get("message") or {}
@@ -2208,6 +2217,13 @@ def llm_apply_instruction(
         + json.dumps(state_blob, ensure_ascii=False)
     )
 
+    log_state = {
+        k: (_parse_json_for_log(v) if k in ("bbox_json", "camera_json", "point_json") and isinstance(v, str) else v)
+        for k, v in state_blob.items()
+    }
+    print(f"\n[MOTIONCANVAS][LLM] sending request (round 0): {_redact_data_urls(user_message)}", flush=True)
+    print(f"[MOTIONCANVAS][LLM] state: {_truncate_for_log(json.dumps(log_state, ensure_ascii=False), limit=3000)}", flush=True)
+
     sent_image_this_turn = bool(llm_send_image)
     if sent_image_this_turn:
         if input_image is None:
@@ -2496,6 +2512,13 @@ def llm_apply_instruction(
                 )
         except Exception:
             tool_results_blob = []
+
+        log_state = {
+            k: (_parse_json_for_log(v) if k in ("bbox_json", "camera_json", "point_json") and isinstance(v, str) else v)
+            for k, v in state_blob.items()
+        }
+        print(f"\n[MOTIONCANVAS][LLM] sending request (round {round_idx + 1}): tool_results={len(tool_results or [])}, tool_names={tool_names}", flush=True)
+        print(f"[MOTIONCANVAS][LLM] state: {_truncate_for_log(json.dumps(log_state, ensure_ascii=False), limit=3000)}", flush=True)
 
         cont_payload = (
             f"已执行第 {round_idx + 1} 轮 tools：{', '.join(tool_names) if tool_names else '(none)'}\n"
