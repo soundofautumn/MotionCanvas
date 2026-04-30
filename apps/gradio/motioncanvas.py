@@ -436,64 +436,41 @@ def compute_track_video(
     if bbox_mask is None:
         return None
 
-    object_masks = None
-    if bbox_json_text and bbox_json_text.strip():
-        object_masks = build_object_masks_from_bbox_json_interpolated(
-            bbox_json_text, int(num_frames), int(height), int(width)
-        )
-
-    if object_masks is None:
-        if bbox_mask.ndim == 5:
-            merged = (bbox_mask.squeeze(0) > 0).any(dim=0, keepdim=True)
-        else:
-            merged = (bbox_mask > 0).any(dim=0, keepdim=True)
-        object_masks = merged.unsqueeze(0).to(dtype=torch.bool)
-
-    point_tracks = build_point_tracks_from_json(point_json_text, int(num_frames), int(height), int(width))
-    if point_tracks is not None:
-        point_masks = build_point_masks_from_tracks(point_tracks, int(num_frames), int(height), int(width), radius=6)
-        if point_masks is not None:
-            object_masks = torch.cat([object_masks, point_masks], dim=0)
-
-    reference_imgs_indicator = [object_masks.shape[0]]
-    video_rgb = build_video_rgb_from_images(
-        input_image, end_image, int(num_frames), int(height), int(width)
-    )
-    if video_rgb is None:
-        return None
     camera_params = build_camera_params_from_json(camera_json_text, int(num_frames))
-    if camera_params:
-        warped_frames = []
-        for f in range(int(num_frames)):
-            img = Image.fromarray((video_rgb[f].permute(1, 2, 0).numpy()).astype(np.uint8))
-            params = camera_params[f]
-            warped = apply_camera_transform(
-                img, params["zoom"], params["pan_x"], params["pan_y"], params["rotation"],
-            )
-            warped_frames.append(torch.from_numpy(np.array(warped)).permute(2, 0, 1))
-        video_rgb = torch.stack(warped_frames, dim=0)
+    if camera_params is None:
+        camera_params = [
+            {"zoom": 1.0, "pan_x": 0.0, "pan_y": 0.0, "rotation": 0.0}
+            for _ in range(int(num_frames))
+        ]
 
-    tiler_kwargs = {"tiled": True, "tile_size": (30, 52), "tile_stride": (15, 26)}
-    pipe.load_models_to_device(["vae"])
-    bbox_latents = pipe.encode_video(bbox_mask, **tiler_kwargs)
-    lat_c = bbox_latents.shape[1]
-
-    device_obj = torch.device(device)
-    cotracker = load_cotracker(device=device_obj, dtype=torch.float32)
-    video_rgb = video_rgb.unsqueeze(0).to(device=device_obj, dtype=torch.float32)
-    object_masks = object_masks.to(device=device_obj)
-
-    object_masks_per_sample = torch.split(object_masks, reference_imgs_indicator, dim=0)
-    track_video, _, _ = get_video_track_video(
-        cotracker,
-        video_rgb,
-        object_masks_per_sample,
-        pipe.downsample_ratios,
-        lat_c,
-        grid_size=12,
-        device=device_obj,
-        dtype=torch.float32,
+    bbox_mask_cpu = bbox_mask.float().cpu() if bbox_mask.is_cuda else bbox_mask.float()
+    background_tracks = generate_background_tracks(
+        camera_params, int(num_frames), int(height), int(width),
+        bbox_mask=bbox_mask_cpu,
     )
+
+    local_tracks = build_point_tracks_from_json(point_json_text, int(num_frames), int(height), int(width))
+    camera_applied_tracks = []
+    if local_tracks is not None:
+        for track in local_tracks:
+            cam_track = []
+            for f, (x, y) in enumerate(track):
+                params = camera_params[f]
+                tx, ty = apply_camera_transform_to_point(
+                    x, y, int(width), int(height),
+                    params["zoom"], params["pan_x"], params["pan_y"], params["rotation"],
+                )
+                cam_track.append((tx, ty))
+            camera_applied_tracks.append(cam_track)
+
+    all_tracks = background_tracks + camera_applied_tracks
+    if not all_tracks:
+        return None
+
+    track_video = build_track_video_from_tracks(all_tracks, int(num_frames), int(height), int(width))
+    if track_video is None:
+        return None
+
     return track_video.to(dtype=torch_dtype, device=device)
 
 
