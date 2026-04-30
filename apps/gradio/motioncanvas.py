@@ -456,15 +456,22 @@ def compute_track_video(
             object_masks = torch.cat([object_masks, point_masks], dim=0)
 
     reference_imgs_indicator = [object_masks.shape[0]]
-    video_rgb = build_video_rgb_from_bbox_motion(
-        input_image, bbox_json_text, camera_json_text, int(num_frames), int(height), int(width)
+    video_rgb = build_video_rgb_from_images(
+        input_image, end_image, int(num_frames), int(height), int(width)
     )
     if video_rgb is None:
-        video_rgb = build_video_rgb_from_images(
-            input_image, end_image, int(num_frames), int(height), int(width)
-        )
-    if video_rgb is None:
         return None
+    camera_params = build_camera_params_from_json(camera_json_text, int(num_frames))
+    if camera_params:
+        warped_frames = []
+        for f in range(int(num_frames)):
+            img = Image.fromarray((video_rgb[f].permute(1, 2, 0).numpy()).astype(np.uint8))
+            params = camera_params[f]
+            warped = apply_camera_transform(
+                img, params["zoom"], params["pan_x"], params["pan_y"], params["rotation"],
+            )
+            warped_frames.append(torch.from_numpy(np.array(warped)).permute(2, 0, 1))
+        video_rgb = torch.stack(warped_frames, dim=0)
 
     tiler_kwargs = {"tiled": True, "tile_size": (30, 52), "tile_stride": (15, 26)}
     pipe.load_models_to_device(["vae"])
