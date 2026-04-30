@@ -856,23 +856,63 @@ def _point_state_to_json(point_state: Dict[str, Any]) -> str:
     if not state:
         return ""
 
-    max_len = 0
-    for pts in state.values():
-        if isinstance(pts, list):
-            max_len = max(max_len, len(pts))
+    tracks: List[Dict[int, tuple]] = []
 
-    tracks: List[Dict[str, Any]] = []
-    for idx in range(max_len):
-        frames: Dict[str, Any] = {}
-        for fi_str, pts in state.items():
-            if idx < len(pts):
-                frames[fi_str] = list(pts[idx])
-        if frames:
-            tracks.append({"frames": frames})
+    for fi_str, pts in state.items():
+        fi = int(fi_str)
+        pts = pts or []
 
-    if not tracks:
+        if not tracks:
+            for pt in pts:
+                tracks.append({fi: tuple(pt)})
+            continue
+
+        preds = []
+        for track in tracks:
+            frames = sorted(track.keys())
+            if len(frames) >= 2:
+                f0, f1 = frames[-2], frames[-1]
+                x0, y0 = track[f0]
+                x1, y1 = track[f1]
+                span = max(1, f1 - f0)
+                t = (fi - f1) / span
+                px = x1 + (x1 - x0) * t
+                py = y1 + (y1 - y0) * t
+            else:
+                f0 = frames[-1]
+                px, py = track[f0]
+            preds.append((px, py))
+
+        candidates = []
+        for ti, (px, py) in enumerate(preds):
+            for pi, pt in enumerate(pts):
+                d = (pt[0] - px) ** 2 + (pt[1] - py) ** 2
+                candidates.append((d, ti, pi))
+        candidates.sort()
+
+        used_tracks = set()
+        used_pts = set()
+        for d, ti, pi in candidates:
+            if ti in used_tracks or pi in used_pts:
+                continue
+            if d > 0.04:
+                continue
+            tracks[ti][fi] = tuple(pts[pi])
+            used_tracks.add(ti)
+            used_pts.add(pi)
+
+        for pi, pt in enumerate(pts):
+            if pi not in used_pts:
+                tracks.append({fi: tuple(pt)})
+
+    result_tracks = []
+    for track in tracks:
+        frames = {str(k): list(v) for k, v in sorted(track.items())}
+        result_tracks.append({"frames": frames})
+
+    if not result_tracks:
         return ""
-    return json.dumps({"points": tracks}, indent=2, ensure_ascii=False)
+    return json.dumps({"points": result_tracks}, indent=2, ensure_ascii=False)
 
 
 def _camera_state_to_json(camera_state: Dict[str, Any]) -> str:

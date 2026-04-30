@@ -195,20 +195,59 @@ def load_models(dit_path, vae_path, text_encoder_path, image_encoder_path,
 def build_bbox_mask_from_json_str(json_str, num_frames, height, width):
     bbox_data = json.loads(json_str)
     mask = torch.zeros(1, 3, num_frames, height, width)
+
     for obj in bbox_data.get("objects", []):
-        for fi_str, bbox in obj.get("frames", {}).items():
+        frames = obj.get("frames", {})
+        if not frames:
+            continue
+
+        keyframes = []
+        for fi_str, bbox in frames.items():
             fi = int(fi_str)
             if fi >= num_frames:
                 continue
             x1, y1, x2, y2 = bbox
             if all(0 <= v <= 1.0 for v in [x1, y1, x2, y2]):
-                x1, x2 = int(x1 * width), int(x2 * width)
-                y1, y2 = int(y1 * height), int(y2 * height)
-            else:
-                x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
-            x1, x2 = max(0, x1), min(width, x2)
-            y1, y2 = max(0, y1), min(height, y2)
-            mask[:, :, fi, y1:y2, x1:x2] = 1.0
+                x1, x2 = x1 * width, x2 * width
+                y1, y2 = y1 * height, y2 * height
+            keyframes.append((fi, float(x1), float(y1), float(x2), float(y2)))
+
+        if not keyframes:
+            continue
+
+        keyframes = sorted(keyframes, key=lambda x: x[0])
+
+        for idx in range(len(keyframes) - 1):
+            f0, x10, y10, x20, y20 = keyframes[idx]
+            f1, x11, y11, x21, y21 = keyframes[idx + 1]
+            span = max(1, f1 - f0)
+            for f in range(f0, f1 + 1):
+                t = (f - f0) / span
+                x1 = int(max(0, min(width, round(x10 + (x11 - x10) * t))))
+                x2 = int(max(0, min(width, round(x20 + (x21 - x20) * t))))
+                y1 = int(max(0, min(height, round(y10 + (y11 - y10) * t))))
+                y2 = int(max(0, min(height, round(y21 + (y20 - y20) * t))))
+                if x2 > x1 and y2 > y1:
+                    mask[:, :, f, y1:y2, x1:x2] = 1.0
+
+        f0, x10, y10, x20, y20 = keyframes[0]
+        x1 = int(max(0, min(width, round(x10))))
+        x2 = int(max(0, min(width, round(x20))))
+        y1 = int(max(0, min(height, round(y10))))
+        y2 = int(max(0, min(height, round(y20))))
+        if x2 > x1 and y2 > y1:
+            for f in range(0, f0):
+                mask[:, :, f, y1:y2, x1:x2] = 1.0
+
+        f1, x11, y11, x21, y21 = keyframes[-1]
+        x1 = int(max(0, min(width, round(x11))))
+        x2 = int(max(0, min(width, round(x21))))
+        y1 = int(max(0, min(height, round(y11))))
+        y2 = int(max(0, min(height, round(y21))))
+        if x2 > x1 and y2 > y1:
+            for f in range(f1, num_frames):
+                mask[:, :, f, y1:y2, x1:x2] = 1.0
+
     return mask * 2.0 - 1.0
 
 
@@ -649,23 +688,63 @@ def _point_state_to_json(point_state):
     if not state:
         return ""
 
-    max_len = 0
-    for pts in state.values():
-        if isinstance(pts, list):
-            max_len = max(max_len, len(pts))
-
     tracks = []
-    for idx in range(max_len):
-        frames = {}
-        for fi_str, pts in state.items():
-            if idx < len(pts):
-                frames[fi_str] = list(pts[idx])
-        if frames:
-            tracks.append({"frames": frames})
 
-    if not tracks:
+    for fi_str, pts in state.items():
+        fi = int(fi_str)
+        pts = pts or []
+
+        if not tracks:
+            for pt in pts:
+                tracks.append({fi: tuple(pt)})
+            continue
+
+        preds = []
+        for track in tracks:
+            frames = sorted(track.keys())
+            if len(frames) >= 2:
+                f0, f1 = frames[-2], frames[-1]
+                x0, y0 = track[f0]
+                x1, y1 = track[f1]
+                span = max(1, f1 - f0)
+                t = (fi - f1) / span
+                px = x1 + (x1 - x0) * t
+                py = y1 + (y1 - y0) * t
+            else:
+                f0 = frames[-1]
+                px, py = track[f0]
+            preds.append((px, py))
+
+        candidates = []
+        for ti, (px, py) in enumerate(preds):
+            for pi, pt in enumerate(pts):
+                d = (pt[0] - px) ** 2 + (pt[1] - py) ** 2
+                candidates.append((d, ti, pi))
+        candidates.sort()
+
+        used_tracks = set()
+        used_pts = set()
+        for d, ti, pi in candidates:
+            if ti in used_tracks or pi in used_pts:
+                continue
+            if d > 0.04:
+                continue
+            tracks[ti][fi] = tuple(pts[pi])
+            used_tracks.add(ti)
+            used_pts.add(pi)
+
+        for pi, pt in enumerate(pts):
+            if pi not in used_pts:
+                tracks.append({fi: tuple(pt)})
+
+    result_tracks = []
+    for track in tracks:
+        frames = {str(k): list(v) for k, v in sorted(track.items())}
+        result_tracks.append({"frames": frames})
+
+    if not result_tracks:
         return ""
-    return json.dumps({"points": tracks}, indent=2)
+    return json.dumps({"points": result_tracks}, indent=2)
 
 
 def save_point_keyframe(point_editor_data, frame_idx, point_state):
@@ -774,7 +853,6 @@ def generate_model_params_from_ui(
         int(height),
         int(width),
         bbox_mask=bbox_mask,
-        grid_size=14,
     )
 
     local_tracks = build_point_tracks_from_json(point_json_text, int(num_frames), int(height), int(width))
@@ -828,7 +906,7 @@ def preview_control_overlay(
     frame_idx=0,
 ):
     if input_image is None:
-        raise gr.Error("请先上传输入图像")
+        return None, None
 
     base = input_image.resize((int(width), int(height))).convert("RGB")
     draw = ImageDraw.Draw(base)
@@ -865,7 +943,6 @@ def preview_control_overlay(
         int(height),
         int(width),
         bbox_mask=bbox_mask,
-        grid_size=14,
     )
 
     local_tracks = build_point_tracks_from_json(point_json_text, int(num_frames), int(height), int(width))
@@ -899,7 +976,7 @@ def preview_control_overlay(
     for x, y in camera_applied:
         draw.ellipse([x - 3, y - 3, x + 3, y + 3], fill=(255, 80, 80))
 
-    return base
+    return base, base
 
 
 def preview_control_video(
@@ -944,7 +1021,6 @@ def preview_control_video(
         height,
         width,
         bbox_mask=bbox_mask,
-        grid_size=14,
     )
 
     local_tracks = build_point_tracks_from_json(point_json_text, num_frames, height, width)
@@ -1106,10 +1182,13 @@ def apply_camera_transform(image, zoom, pan_x, pan_y, rotation):
         top = (new_h - h) // 2
         cropped = resized.crop((left, top, left + w, top + h))
     else:
-        cropped = Image.new("RGB", (w, h), (0, 0, 0))
-        left = (w - new_w) // 2
-        top = (h - new_h) // 2
-        cropped.paste(resized, (left, top))
+        arr = np.array(resized)
+        pad_l = (w - new_w) // 2
+        pad_t = (h - new_h) // 2
+        pad_r = w - new_w - pad_l
+        pad_b = h - new_h - pad_t
+        arr = np.pad(arr, ((pad_t, pad_b), (pad_l, pad_r), (0, 0)), mode="reflect")
+        cropped = Image.fromarray(arr)
 
     rotated = cropped.rotate(rotation, resample=Image.BILINEAR, expand=False)
 
@@ -1133,7 +1212,7 @@ def apply_camera_transform_to_point(x, y, width, height, zoom, pan_x, pan_y, rot
     return rx + cx + pan_x, ry + cy + pan_y
 
 
-def generate_background_tracks(camera_params, num_frames, height, width, bbox_mask=None, grid_size=14):
+def generate_background_tracks(camera_params, num_frames, height, width, bbox_mask=None, grid_size=20):
     xs = np.linspace(0, width - 1, grid_size)
     ys = np.linspace(0, height - 1, grid_size)
     points = [(float(x), float(y)) for y in ys for x in xs]
@@ -1359,9 +1438,9 @@ def generate_video(
                     for _ in range(int(num_frames))
                 ]
             background_tracks = generate_background_tracks(
-                camera_params, int(num_frames), int(height), int(width),
-                bbox_mask=None, grid_size=14,
-            )
+            camera_params, int(num_frames), int(height), int(width),
+            bbox_mask=bbox_mask,
+        )
             local_tracks = build_point_tracks_from_json(point_json_text, int(num_frames), int(height), int(width))
             camera_applied_tracks = []
             if local_tracks is not None:
@@ -1740,8 +1819,8 @@ with gr.Blocks(
     )
 
     sync_btn.click(
-        fn=_preview_image,
-        inputs=[input_image],
+        fn=preview_control_overlay,
+        inputs=[input_image, num_frames, height, width, bbox_json_text, camera_json_text, point_json_text, motion_frame_idx],
         outputs=[bbox_preview, point_preview],
     )
 
@@ -1752,9 +1831,12 @@ with gr.Blocks(
         outputs=[motion_frame_idx],
     )
 
-    # ---- 切换帧时，重置画布为输入图像（避免跨帧残留笔迹） ----
-    motion_frame_idx.change(fn=_preview_image, inputs=[input_image], outputs=[bbox_preview])
-    motion_frame_idx.change(fn=_preview_image, inputs=[input_image], outputs=[point_preview])
+    # ---- 切换帧时，更新控制预览（bbox + 点轨迹 + 镜头轨迹叠加） ----
+    motion_frame_idx.change(
+        fn=preview_control_overlay,
+        inputs=[input_image, num_frames, height, width, bbox_json_text, camera_json_text, point_json_text, motion_frame_idx],
+        outputs=[bbox_preview, point_preview],
+    )
 
     # ---- Bbox 关键帧保存/删除 ----
     bbox_save_btn = gr.Button("保存当前帧选区", variant="secondary", visible=False)

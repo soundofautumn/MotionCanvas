@@ -299,7 +299,7 @@ def main() -> None:
     parser.add_argument("--num_frames", type=int, default=49)
     parser.add_argument("--width", type=int, default=832)
     parser.add_argument("--height", type=int, default=480)
-    parser.add_argument("--grid_size", type=int, default=14)
+    parser.add_argument("--grid_size", type=int, default=20)
     parser.add_argument("--dct_coeffs", type=int, default=10)
     parser.add_argument("--output_dir", type=str, default="outputs/intent")
     args = parser.parse_args()
