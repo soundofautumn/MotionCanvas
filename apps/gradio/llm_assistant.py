@@ -607,6 +607,10 @@ LLM_SYSTEM_PROMPT = """你是 MotionCanvas 的“镜头/物体运动控制 + 生
     - 推荐使用归一化坐标（norm）：范围 [0,1]，以当前 width/height 为基准。
     - 也允许像素坐标（px），但你必须在输出里明确（通过 ops 的 space=px，或在 updates 里写入 px 坐标并在说明里注明）。
 - point 的格式为 [x, y]，同样优先使用归一化坐标（norm，范围 [0,1]）。
+- 相机参数：
+    - zoom 是倍率（1.0=无缩放），不是坐标，不区分 norm/px。
+    - pan (pan_x/pan_y) 是像素偏移量，单位为像素（px），不要用 norm。
+    - rotation 是角度（度），不是坐标，不区分 norm/px。
 - 帧索引 frame 都是 0-based，必须满足 [0, num_frames-1]。
 
 你可以修改的 UI 状态字段：
@@ -1420,14 +1424,14 @@ def get_motion_tools() -> List[Dict[str, Any]]:
             "type": "function",
             "function": {
                 "name": "camera_set",
-                "description": "Set camera parameters for a specific frame.",
+                "description": "Set camera parameters for a specific frame. Pan values are in pixels.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "frame": {"type": "integer"},
-                        "zoom": {"type": "number"},
-                        "pan": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2},
-                        "rotation": {"type": "number"},
+                        "frame": {"type": "integer", "description": "Target frame index."},
+                        "zoom": {"type": "number", "description": "Zoom multiplier (1.0 = no zoom). Default 1.0."},
+                        "pan": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2, "description": "Pan offset in pixels as [pan_x, pan_y]."},
+                        "rotation": {"type": "number", "description": "Rotation in degrees. Default 0."},
                     },
                     "required": ["frame"],
                 },
@@ -1441,10 +1445,10 @@ def get_motion_tools() -> List[Dict[str, Any]]:
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "start_frame": {"type": "integer"},
-                        "end_frame": {"type": "integer"},
-                        "start": {"type": "number"},
-                        "end": {"type": "number"},
+                        "start_frame": {"type": "integer", "description": "Start frame index."},
+                        "end_frame": {"type": "integer", "description": "End frame index."},
+                        "start": {"type": "number", "description": "Zoom at start_frame (1.0 = no zoom)."},
+                        "end": {"type": "number", "description": "Zoom at end_frame (1.0 = no zoom)."},
                     },
                     "required": ["start_frame", "end_frame", "start", "end"],
                 },
@@ -1454,14 +1458,14 @@ def get_motion_tools() -> List[Dict[str, Any]]:
             "type": "function",
             "function": {
                 "name": "camera_pan_linear",
-                "description": "Create/adjust camera pan with linear keyframes between two frames.",
+                "description": "Create/adjust camera pan with linear keyframes between two frames. Pan values are in pixels.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "start_frame": {"type": "integer"},
-                        "end_frame": {"type": "integer"},
-                        "start": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2},
-                        "end": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2},
+                        "start_frame": {"type": "integer", "description": "Start frame index."},
+                        "end_frame": {"type": "integer", "description": "End frame index."},
+                        "start": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2, "description": "Pan at start_frame as [pan_x, pan_y] in pixels."},
+                        "end": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2, "description": "Pan at end_frame as [pan_x, pan_y] in pixels."},
                     },
                     "required": ["start_frame", "end_frame", "start", "end"],
                 },
@@ -1475,10 +1479,10 @@ def get_motion_tools() -> List[Dict[str, Any]]:
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "start_frame": {"type": "integer"},
-                        "end_frame": {"type": "integer"},
-                        "start": {"type": "number"},
-                        "end": {"type": "number"},
+                        "start_frame": {"type": "integer", "description": "Start frame index."},
+                        "end_frame": {"type": "integer", "description": "End frame index."},
+                        "start": {"type": "number", "description": "Rotation in degrees at start_frame."},
+                        "end": {"type": "number", "description": "Rotation in degrees at end_frame."},
                     },
                     "required": ["start_frame", "end_frame", "start", "end"],
                 },
@@ -1492,11 +1496,11 @@ def get_motion_tools() -> List[Dict[str, Any]]:
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "start_frame": {"type": "integer"},
-                        "end_frame": {"type": "integer"},
-                        "dx": {"type": "number"},
-                        "dy": {"type": "number"},
-                        "space": {"type": "string", "enum": ["norm", "px"]},
+                        "start_frame": {"type": "integer", "description": "Start frame index."},
+                        "end_frame": {"type": "integer", "description": "End frame index."},
+                        "dx": {"type": "number", "description": "Translation in x (norm or px, depends on space)."},
+                        "dy": {"type": "number", "description": "Translation in y (norm or px, depends on space)."},
+                        "space": {"type": "string", "enum": ["norm", "px"], "description": "Coordinate space: norm=[0,1] relative to image, px=absolute pixels. Default norm."},
                         "transition": {
                             "type": "string",
                             "enum": ["step", "linear"],
@@ -1515,9 +1519,9 @@ def get_motion_tools() -> List[Dict[str, Any]]:
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "frame": {"type": "integer"},
-                        "bbox": {"type": "array", "items": {"type": "number"}, "minItems": 4, "maxItems": 4},
-                        "space": {"type": "string", "enum": ["norm", "px"]},
+                        "frame": {"type": "integer", "description": "Target frame index."},
+                        "bbox": {"type": "array", "items": {"type": "number"}, "minItems": 4, "maxItems": 4, "description": "Bounding box as [x1, y1, x2, y2] in the coordinate space specified by space."},
+                        "space": {"type": "string", "enum": ["norm", "px"], "description": "Coordinate space: norm=[0,1] relative to image, px=absolute pixels. Default norm."},
                     },
                     "required": ["frame", "bbox"],
                 },
@@ -1531,11 +1535,11 @@ def get_motion_tools() -> List[Dict[str, Any]]:
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "start_frame": {"type": "integer"},
-                        "end_frame": {"type": "integer"},
-                        "dx": {"type": "number"},
-                        "dy": {"type": "number"},
-                        "space": {"type": "string", "enum": ["norm", "px"]},
+                        "start_frame": {"type": "integer", "description": "Start frame index."},
+                        "end_frame": {"type": "integer", "description": "End frame index."},
+                        "dx": {"type": "number", "description": "Translation in x (norm or px, depends on space)."},
+                        "dy": {"type": "number", "description": "Translation in y (norm or px, depends on space)."},
+                        "space": {"type": "string", "enum": ["norm", "px"], "description": "Coordinate space: norm=[0,1] relative to image, px=absolute pixels. Default norm."},
                         "transition": {
                             "type": "string",
                             "enum": ["step", "linear"],
@@ -1554,13 +1558,14 @@ def get_motion_tools() -> List[Dict[str, Any]]:
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "frame": {"type": "integer"},
+                        "frame": {"type": "integer", "description": "Target frame index."},
                         "points": {
                             "type": "array",
                             "items": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2},
                             "minItems": 1,
+                            "description": "List of [x, y] points in the coordinate space specified by space.",
                         },
-                        "space": {"type": "string", "enum": ["norm", "px"]},
+                        "space": {"type": "string", "enum": ["norm", "px"], "description": "Coordinate space: norm=[0,1] relative to image, px=absolute pixels. Default norm."},
                     },
                     "required": ["frame", "points"],
                 },
