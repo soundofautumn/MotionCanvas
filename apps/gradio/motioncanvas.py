@@ -551,6 +551,12 @@ def _preview_image(input_image):
     return img, img
 
 
+def _clear_on_image_change(input_image):
+    """更换图像时清空参数和 LLM 上下文。"""
+    preview = _preview_image(input_image)
+    return *preview, {}, {}, {}, "", "", "", [], "", None
+
+
 def sync_image_to_editors(input_image):
     """将输入图像同步到画布作为背景。"""
     if input_image is None:
@@ -1723,9 +1729,14 @@ with gr.Blocks(
     # ---- 事件绑定 ----
 
     input_image.change(
-        fn=_preview_image,
+        fn=_clear_on_image_change,
         inputs=[input_image],
-        outputs=[bbox_preview, point_preview],
+        outputs=[
+            bbox_preview, point_preview,
+            bbox_kf_state, point_kf_state, camera_kf_state,
+            bbox_json_text, point_json_text, camera_json_text,
+            llm_chatbot, llm_user_msg, output_video,
+        ],
     )
 
     sync_btn.click(
