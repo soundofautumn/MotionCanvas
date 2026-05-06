@@ -115,6 +115,58 @@ def _get_gdino_model_and_processor():
     return model, processor
 
 
+_BODY_PART_RULES = {
+    "head": (0.0, 0.30), "face": (0.0, 0.30), "hair": (0.0, 0.25),
+    "forehead": (0.0, 0.20), "scalp": (0.0, 0.20),
+    "eye": (0.0, 0.30), "eyebrow": (0.0, 0.28), "eyelash": (0.0, 0.28),
+    "nose": (0.0, 0.30), "mouth": (0.0, 0.30), "lip": (0.0, 0.30),
+    "chin": (0.10, 0.30), "jaw": (0.05, 0.30), "cheek": (0.05, 0.28),
+    "ear": (0.0, 0.30), "beard": (0.10, 0.30), "mustache": (0.10, 0.28),
+    "neck": (0.15, 0.40), "throat": (0.15, 0.40),
+    "shoulder": (0.20, 0.50),
+    "chest": (0.20, 0.55), "breast": (0.20, 0.55),
+    "torso": (0.15, 0.65), "belly": (0.30, 0.60), "stomach": (0.30, 0.60),
+    "waist": (0.35, 0.65),
+    "arm": (0.15, 0.55), "elbow": (0.25, 0.55), "forearm": (0.35, 0.60),
+    "wrist": (0.40, 0.60), "hand": (0.40, 0.65), "finger": (0.45, 0.65),
+    "palm": (0.40, 0.65),
+    "hip": (0.45, 0.70), "butt": (0.45, 0.75),
+    "thigh": (0.50, 0.80), "leg": (0.55, 1.0),
+    "knee": (0.60, 0.85), "shin": (0.65, 0.90), "calf": (0.65, 0.90),
+    "ankle": (0.80, 1.0), "heel": (0.85, 1.0), "foot": (0.80, 1.0),
+    "toe": (0.85, 1.0),
+}
+
+
+def _narrow_bbox_for_body_part(bbox_norm, query):
+    query_lower = query.lower()
+    best_keyword = None
+    best_len = 0
+    for kw in _BODY_PART_RULES:
+        if kw in query_lower and len(kw) > best_len:
+            best_keyword = kw
+            best_len = len(kw)
+    if best_keyword is None:
+        return bbox_norm
+
+    x1, y1, x2, y2 = bbox_norm
+    bh = y2 - y1
+    y1r, y2r = _BODY_PART_RULES[best_keyword]
+    new_y1 = y1 + bh * y1r
+    new_y2 = y1 + bh * y2r
+
+    if "left" in query_lower:
+        bw = x2 - x1
+        new_x2 = x1 + bw * 0.55
+        return [x1, new_y1, new_x2, new_y2]
+    if "right" in query_lower:
+        bw = x2 - x1
+        new_x1 = x1 + bw * 0.45
+        return [new_x1, new_y1, x2, new_y2]
+
+    return [x1, new_y1, x2, new_y2]
+
+
 def _gdino_best_box_norm(
     image: Image.Image,
     *,
@@ -1978,6 +2030,8 @@ def _apply_tool_calls(
                 _add_result_for(call_id, name, {"ok": False, "error": "invalid_box", "det": det})
                 continue
 
+            bbox_norm = _narrow_bbox_for_body_part(bbox_norm, query)
+
             fi = str(int(f))
             bbox_state[fi] = bbox_norm
             msgs.append(f"gdino_detect_bbox(score={float(det.get('score',0)):.2f},frame={f})")
@@ -2004,6 +2058,8 @@ def _apply_tool_calls(
                 msgs.append("gdino_sam_detect_point:invalid_box")
                 _add_result_for(call_id, name, {"ok": False, "error": "invalid_box", "det": det})
                 continue
+
+            bbox_norm = _narrow_bbox_for_body_part(bbox_norm, query)
 
             # Try SAM refinement; if SAM is not configured, fall back to bbox center.
             point_norm = None
