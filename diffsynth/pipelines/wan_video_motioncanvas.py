@@ -410,7 +410,6 @@ class WanVideoPipeline_motioncanvas(BasePipeline):
         # visualization para
         training_visualization=False,
         latents_shape=None,
-        video_rgb=None,
         reference_imgs=None,
         reference_imgs_indicator=None,
         bbox_mask=None,

@@ -1414,7 +1414,7 @@ def generate_video(
 
     debug_lines = []
 
-    # ---- 2. 如果 track_video_file 提供了，直接走预计算路径 ----
+    # ---- 2. track_video ----
     track_video = None
     if track_video_file is not None:
         track_video = torch.load(track_video_file, map_location="cpu")
@@ -1422,55 +1422,18 @@ def generate_video(
         debug_lines.append(
             f"track_video loaded: shape={tuple(track_video.shape)}"
         )
-
-    # ---- 3. 否则走原始 pipeline 的 CoTracker 路径 ----
-    video_rgb = None
-    object_masks = None
-    reference_imgs_indicator = None
-    cotracker = None
-
-    if track_video is None:
-        if bbox_json_text and bbox_json_text.strip() and input_image is not None:
-            try:
-                object_masks = build_object_masks_from_bbox_json_interpolated(
-                    bbox_json_text, int(num_frames), int(height), int(width)
-                )
-                if object_masks is not None:
-                    reference_imgs_indicator = [object_masks.shape[0]]
-            except Exception:
-                pass
-
-            try:
-                video_rgb = build_video_rgb_from_bbox_motion(
-                    input_image, bbox_json_text, camera_json_text,
-                    int(num_frames), int(height), int(width)
-                )
-                if video_rgb is not None:
-                    video_rgb = video_rgb.unsqueeze(0).to(device=device, dtype=torch.float32)
-                    debug_lines.append(
-                        f"video_rgb built: shape={tuple(video_rgb.shape)}, dtype={video_rgb.dtype}"
-                    )
-            except Exception as e:
-                print(f"video_rgb build failed: {e}")
-
-        if object_masks is not None and video_rgb is not None:
-            try:
-                cotracker = load_cotracker(device, torch_dtype)
-                debug_lines.append("CoTracker loaded")
-            except Exception as e:
-                print(f"CoTracker load failed: {e}")
-                debug_lines.append("CoTracker load failed, will use pre-computed track_video")
-
-        # fallback: 没有 CoTracker 时用简单的 bbox 中心轨迹
-        if cotracker is None:
-            debug_lines.append("fallback: generating simple track_video from bbox centers")
-            track_video = _build_fallback_track_video(
-                bbox_json_text, camera_json_text, point_json_text,
-                int(num_frames), int(height), int(width),
-                torch_dtype, device
+    else:
+        track_video = _build_fallback_track_video(
+            bbox_json_text, camera_json_text, point_json_text,
+            int(num_frames), int(height), int(width),
+            torch_dtype, device
+        )
+        if track_video is not None:
+            debug_lines.append(
+                f"track_video generated: shape={tuple(track_video.shape)}"
             )
 
-    # ---- 4. 构建管道参数 ----
+    # ---- 3. 构建管道参数 ----
     pipeline_kwargs = {
         "prompt": [prompt],
         "negative_prompt": negative_prompt,
@@ -1488,10 +1451,6 @@ def generate_video(
         "tile_stride": (15, 26),
         "bbox_mask": bbox_mask,
         "track_video": track_video,
-        "video_rgb": video_rgb,
-        "cotracker": cotracker,
-        "object_masks": object_masks,
-        "reference_imgs_indicator": reference_imgs_indicator,
         "progress_bar_cmd": progress.tqdm,
     }
 
