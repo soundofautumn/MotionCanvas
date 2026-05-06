@@ -1733,7 +1733,7 @@ with gr.Blocks(
 
                             llm_send_image = gr.Checkbox(
                                 label="发送起始帧图像给 LLM（多模态，模型需支持 Vision）",
-                                value=False,
+                                value=True,
                             )
 
                             llm_chatbot = gr.Chatbot(
