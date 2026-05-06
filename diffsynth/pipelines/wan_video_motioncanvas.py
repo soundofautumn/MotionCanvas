@@ -354,34 +354,24 @@ class WanVideoPipeline_motioncanvas(BasePipeline):
         tiler_kwargs={},
         track_video=None,
     ):
-        bbox_latents = None
-        if bbox_mask is not None:
-            self.load_models_to_device(["vae"])
-            bbox_mask = bbox_mask.to(dtype=self.torch_dtype, device=self.device)
-            bbox_latents = self.encode_video(bbox_mask, **tiler_kwargs).to(dtype=self.torch_dtype, device=self.device)
-            lat_c = bbox_latents.shape[1]
-            bbox_latents = self.bbox_zeroconv(bbox_latents)
-        else:
-            lat_c = None   # 后续生成 track_video 时需要，若无 bbox_mask 则无法确定通道数，此处设为 None
+        bbox_latents = self.encode_video(bbox_mask, **tiler_kwargs).to(dtype=self.torch_dtype, device=self.device)
+        lat_c = bbox_latents.shape[1]
+        bbox_latents = self.bbox_zeroconv(bbox_latents)
 
         track_info = None
         if track_video is None:
-            # 仅当所有必需参数都存在时才生成 track_video
-            if all(v is not None for v in [cotracker, video_rgb, object_masks, reference_imgs_indicator, lat_c]):
-                object_masks_per_sample = torch.split(object_masks, reference_imgs_indicator, dim=0)
-                track_video, track_pos, track_info = get_video_track_video(
-                    cotracker, 
-                    video_rgb,
-                    object_masks_per_sample, 
-                    self.downsample_ratios, 
-                    lat_c, 
-                    grid_size=12, 
-                    device=self.device, 
-                    dtype=torch.float32
-                )
-                track_video = track_video.to(self.torch_dtype)
-            else:
-                track_video = None
+            object_masks_per_sample = torch.split(object_masks, reference_imgs_indicator, dim=0)
+            track_video, track_pos, track_info = get_video_track_video(
+                cotracker, 
+                video_rgb,
+                object_masks_per_sample, 
+                self.downsample_ratios, 
+                lat_c, 
+                grid_size=12, 
+                device=self.device, 
+                dtype=torch.float32
+            )
+            track_video = track_video.to(self.torch_dtype)
 
         return bbox_latents, track_video, track_info
 
@@ -418,6 +408,7 @@ class WanVideoPipeline_motioncanvas(BasePipeline):
         # visualization para
         training_visualization=False,
         latents_shape=None,
+        video_rgb=None,
         reference_imgs=None,
         reference_imgs_indicator=None,
         bbox_mask=None,
@@ -463,7 +454,7 @@ class WanVideoPipeline_motioncanvas(BasePipeline):
             prompt_emb_nega = self.encode_prompt([negative_prompt] * len(prompt), positive=False)
         
         bbox_latents, traj_video, track_info = self.prepare_motioncanvas_kwargs(
-            video_rgb=None,
+            video_rgb=video_rgb,
             video_frame_num=49,
             bbox_mask=bbox_mask,
             reference_imgs_indicator=reference_imgs_indicator,
@@ -474,8 +465,7 @@ class WanVideoPipeline_motioncanvas(BasePipeline):
             track_video=track_video,
         )
 
-        if bbox_latents is not None:
-            latents = latents + bbox_latents
+        latents = latents + bbox_latents
         dreamvideo2_kwargs = {'traj_video': traj_video}
             
         # Encode image

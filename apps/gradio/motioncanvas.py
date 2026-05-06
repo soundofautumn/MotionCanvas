@@ -419,120 +419,7 @@ def build_video_rgb_from_bbox_motion(input_image, bbox_json_text, camera_json_te
     return torch.stack(frames_out, dim=0)
 
 
-def compute_track_video(
-    pipe,
-    torch_dtype,
-    device,
-    bbox_mask,
-    bbox_json_text,
-    camera_json_text,
-    point_json_text,
-    input_image,
-    end_image,
-    num_frames,
-    height,
-    width,
-):
-    if bbox_mask is None:
-        return None
 
-    camera_params = build_camera_params_from_json(camera_json_text, int(num_frames))
-    if camera_params is None:
-        camera_params = [
-            {"zoom": 1.0, "pan_x": 0.0, "pan_y": 0.0, "rotation": 0.0}
-            for _ in range(int(num_frames))
-        ]
-
-    bbox_mask_cpu = bbox_mask.float().cpu() if bbox_mask.is_cuda else bbox_mask.float()
-    background_tracks = generate_background_tracks(
-        camera_params, int(num_frames), int(height), int(width),
-        bbox_mask=bbox_mask_cpu,
-    )
-
-    local_tracks = build_point_tracks_from_json(point_json_text, int(num_frames), int(height), int(width))
-    camera_applied_tracks = []
-    if local_tracks is not None:
-        for track in local_tracks:
-            cam_track = []
-            for f, (x, y) in enumerate(track):
-                params = camera_params[f]
-                tx, ty = apply_camera_transform_to_point(
-                    x, y, int(width), int(height),
-                    params["zoom"], params["pan_x"], params["pan_y"], params["rotation"],
-                )
-                cam_track.append((tx, ty))
-            camera_applied_tracks.append(cam_track)
-
-    all_tracks = background_tracks + camera_applied_tracks
-
-    if bbox_json_text and bbox_json_text.strip():
-        try:
-            bbox_data = json.loads(bbox_json_text)
-            objects = bbox_data.get("objects", [])
-            for obj in objects:
-                frames = obj.get("frames", {})
-                if not frames:
-                    continue
-                keyframes = []
-                for fi_str, bbox in frames.items():
-                    fi = int(fi_str)
-                    if fi >= int(num_frames):
-                        continue
-                    x1, y1, x2, y2 = bbox
-                    if all(0 <= v <= 1.0 for v in [x1, y1, x2, y2]):
-                        x1, x2 = x1 * int(width), x2 * int(width)
-                        y1, y2 = y1 * int(height), y2 * int(height)
-                    keyframes.append((fi, float(x1), float(y1), float(x2), float(y2)))
-                if not keyframes:
-                    continue
-                keyframes = sorted(keyframes, key=lambda x: x[0])
-
-                def interp_bbox(f):
-                    if f <= keyframes[0][0]:
-                        return keyframes[0][1:]
-                    if f >= keyframes[-1][0]:
-                        return keyframes[-1][1:]
-                    for idx in range(len(keyframes) - 1):
-                        f0, *b0 = keyframes[idx]
-                        f1, *b1 = keyframes[idx + 1]
-                        if f0 <= f <= f1:
-                            span = max(1, f1 - f0)
-                            t = (f - f0) / span
-                            return tuple(b0[j] + (b1[j] - b0[j]) * t for j in range(4))
-                    return keyframes[-1][1:]
-
-                for ref_point in ["center", "tl", "tr", "bl", "br"]:
-                    track = []
-                    for f in range(int(num_frames)):
-                        x1, y1, x2, y2 = interp_bbox(f)
-                        if ref_point == "center":
-                            px, py = (x1 + x2) / 2.0, (y1 + y2) / 2.0
-                        elif ref_point == "tl":
-                            px, py = x1, y1
-                        elif ref_point == "tr":
-                            px, py = x2, y1
-                        elif ref_point == "bl":
-                            px, py = x1, y2
-                        else:
-                            px, py = x2, y2
-                        params = camera_params[f]
-                        tx, ty = apply_camera_transform_to_point(
-                            px, py, int(width), int(height),
-                            params["zoom"], params["pan_x"], params["pan_y"], params["rotation"],
-                        )
-                        track.append((tx, ty))
-                    all_tracks.append(track)
-        except Exception as e:
-            print(f"Bbox trajectory tracks failed: {e}")
-
-    if not all_tracks:
-        return None
-
-    track_video = build_track_video_from_tracks(all_tracks, int(num_frames), int(height), int(width))
-    if track_video is None:
-        return None
-
-    return track_video.to(dtype=torch_dtype, device=device)
 
 
 def load_cotracker(device, dtype):
@@ -1408,6 +1295,88 @@ def _reset_editor_canvas(input_image):
 
 
 
+def _build_fallback_track_video(bbox_json_text, camera_json_text, point_json_text, num_frames, height, width, torch_dtype, device):
+    """Fallback: 当 CoTracker 不可用时，从 bbox 关键帧 + 相机参数 + 点关键帧生成 track_video"""
+    camera_params = build_camera_params_from_json(camera_json_text, num_frames)
+    if camera_params is None:
+        camera_params = [{"zoom": 1.0, "pan_x": 0.0, "pan_y": 0.0, "rotation": 0.0} for _ in range(num_frames)]
+
+    tracks = []
+
+    # 相机背景网格（无 bbox mask 过滤）
+    xs = np.linspace(0, width - 1, 16)
+    ys = np.linspace(0, height - 1, 16)
+    for gx in xs:
+        for gy in ys:
+            track = []
+            for f in range(num_frames):
+                p = camera_params[f]
+                tx, ty = apply_camera_transform_to_point(gx, gy, width, height, p["zoom"], p["pan_x"], p["pan_y"], p["rotation"])
+                track.append((tx, ty))
+            tracks.append(track)
+
+    # bbox 物体中心轨迹
+    if bbox_json_text and bbox_json_text.strip():
+        try:
+            bbox_data = json.loads(bbox_json_text)
+            for obj in bbox_data.get("objects", []):
+                frames = obj.get("frames", {})
+                if not frames:
+                    continue
+                kfs = []
+                for fi_str, bbox in frames.items():
+                    fi = int(fi_str)
+                    if fi >= num_frames:
+                        continue
+                    x1, y1, x2, y2 = bbox
+                    if all(0 <= v <= 1.0 for v in [x1, y1, x2, y2]):
+                        x1, x2 = x1 * width, x2 * width
+                        y1, y2 = y1 * height, y2 * height
+                    kfs.append((fi, (x1 + x2) / 2.0, (y1 + y2) / 2.0))
+                if not kfs:
+                    continue
+                kfs = sorted(kfs, key=lambda x: x[0])
+                track = []
+                for f in range(num_frames):
+                    if f <= kfs[0][0]:
+                        cx, cy = kfs[0][1], kfs[0][2]
+                    elif f >= kfs[-1][0]:
+                        cx, cy = kfs[-1][1], kfs[-1][2]
+                    else:
+                        for idx in range(len(kfs) - 1):
+                            f0, cx0, cy0 = kfs[idx]
+                            f1, cx1, cy1 = kfs[idx + 1]
+                            if f0 <= f <= f1:
+                                t = (f - f0) / max(1, f1 - f0)
+                                cx = cx0 + (cx1 - cx0) * t
+                                cy = cy0 + (cy1 - cy0) * t
+                                break
+                    p = camera_params[f]
+                    tx, ty = apply_camera_transform_to_point(cx, cy, width, height, p["zoom"], p["pan_x"], p["pan_y"], p["rotation"])
+                    track.append((tx, ty))
+                tracks.append(track)
+        except Exception:
+            pass
+
+    # 用户点关键帧轨迹
+    local_tracks = build_point_tracks_from_json(point_json_text, num_frames, height, width)
+    if local_tracks is not None:
+        for track in local_tracks:
+            cam_track = []
+            for f, (x, y) in enumerate(track):
+                p = camera_params[f]
+                tx, ty = apply_camera_transform_to_point(x, y, width, height, p["zoom"], p["pan_x"], p["pan_y"], p["rotation"])
+                cam_track.append((tx, ty))
+            tracks.append(cam_track)
+
+    if not tracks:
+        return None
+    tv = build_track_video_from_tracks(tracks, num_frames, height, width)
+    if tv is None:
+        return None
+    return tv.to(dtype=torch_dtype, device=device)
+
+
 # ==================== Video Generation ====================
 
 def generate_video(
@@ -1425,7 +1394,7 @@ def generate_video(
     torch_dtype = pipe_state["torch_dtype"]
     device = pipe.device
 
-    bbox_mask = None
+    # ---- 1. bbox_mask（必需）----
     if bbox_mask_file is not None:
         bbox_mask = torch.load(bbox_mask_file, map_location="cpu")
         bbox_mask = bbox_mask.to(dtype=torch_dtype, device=device)
@@ -1437,50 +1406,71 @@ def generate_video(
             bbox_mask = bbox_mask.to(dtype=torch_dtype, device=device)
         except Exception as e:
             raise gr.Error(f"Bbox JSON 解析失败: {e}")
-
-    # 处理相机运动
-    debug_lines = []
-    track_video = None
-    if track_video_file is not None:
-        track_video = torch.load(track_video_file, map_location="cpu")
-        track_video = track_video.to(dtype=torch_dtype, device=device)
-        debug_lines.append(
-            f"track_video loaded: shape={tuple(track_video.shape)}, dtype={track_video.dtype}, device={track_video.device}"
-        )
-
-    if track_video is None and bbox_mask is not None:
-        try:
-            track_video = compute_track_video(
-                pipe,
-                torch_dtype,
-                device,
-                bbox_mask,
-                bbox_json_text,
-                camera_json_text,
-                point_json_text,
-                input_image,
-                end_image,
-                num_frames,
-                height,
-                width,
-            )
-        except Exception as e:
-            raise gr.Error(f"Track video 生成失败: {e}")
-
-        if track_video is None:
-            debug_lines.append("track_video skipped: video_rgb is None")
-        else:
-            debug_lines.append(
-                f"track_video generated: shape={tuple(track_video.shape)}, dtype={track_video.dtype}, device={track_video.device}"
-            )
-
-    if bbox_mask is None and track_video is None:
+    else:
         raise gr.Error(
             "必须提供 bbox 控制（物体全局运动）才能生成视频。\n"
             "请通过 LLM 助手或手动编辑添加至少一个 bbox 关键帧。"
         )
 
-    # 构建管道参数
+    debug_lines = []
+
+    # ---- 2. 如果 track_video_file 提供了，直接走预计算路径 ----
+    track_video = None
+    if track_video_file is not None:
+        track_video = torch.load(track_video_file, map_location="cpu")
+        track_video = track_video.to(dtype=torch_dtype, device=device)
+        debug_lines.append(
+            f"track_video loaded: shape={tuple(track_video.shape)}"
+        )
+
+    # ---- 3. 否则走原始 pipeline 的 CoTracker 路径 ----
+    video_rgb = None
+    object_masks = None
+    reference_imgs_indicator = None
+    cotracker = None
+
+    if track_video is None:
+        if bbox_json_text and bbox_json_text.strip() and input_image is not None:
+            try:
+                object_masks = build_object_masks_from_bbox_json_interpolated(
+                    bbox_json_text, int(num_frames), int(height), int(width)
+                )
+                if object_masks is not None:
+                    reference_imgs_indicator = [object_masks.shape[0]]
+            except Exception:
+                pass
+
+            try:
+                video_rgb = build_video_rgb_from_bbox_motion(
+                    input_image, bbox_json_text, camera_json_text,
+                    int(num_frames), int(height), int(width)
+                )
+                if video_rgb is not None:
+                    video_rgb = video_rgb.unsqueeze(0).to(device=device, dtype=torch.float32)
+                    debug_lines.append(
+                        f"video_rgb built: shape={tuple(video_rgb.shape)}, dtype={video_rgb.dtype}"
+                    )
+            except Exception as e:
+                print(f"video_rgb build failed: {e}")
+
+        if object_masks is not None and video_rgb is not None:
+            try:
+                cotracker = load_cotracker(device, torch_dtype)
+                debug_lines.append("CoTracker loaded")
+            except Exception as e:
+                print(f"CoTracker load failed: {e}")
+                debug_lines.append("CoTracker load failed, will use pre-computed track_video")
+
+        # fallback: 没有 CoTracker 时用简单的 bbox 中心轨迹
+        if cotracker is None:
+            debug_lines.append("fallback: generating simple track_video from bbox centers")
+            track_video = _build_fallback_track_video(
+                bbox_json_text, camera_json_text, point_json_text,
+                int(num_frames), int(height), int(width),
+                torch_dtype, device
+            )
+
+    # ---- 4. 构建管道参数 ----
     pipeline_kwargs = {
         "prompt": [prompt],
         "negative_prompt": negative_prompt,
@@ -1498,6 +1488,10 @@ def generate_video(
         "tile_stride": (15, 26),
         "bbox_mask": bbox_mask,
         "track_video": track_video,
+        "video_rgb": video_rgb,
+        "cotracker": cotracker,
+        "object_masks": object_masks,
+        "reference_imgs_indicator": reference_imgs_indicator,
         "progress_bar_cmd": progress.tqdm,
     }
 
@@ -1508,8 +1502,6 @@ def generate_video(
 
     output_path = os.path.join(tempfile.gettempdir(), "motioncanvas_output.mp4")
     save_video(video_frames[0], output_path, fps=int(fps), quality=5)
-    if not debug_lines:
-        debug_lines.append("track_video not provided and not generated")
 
     for line in debug_lines:
         print(line)
