@@ -718,6 +718,16 @@ updates 语义（可选，用于直接覆盖字段）：
 - 不要编造不存在的 tool 名称。
 - 如果用户要“精确调整某个物体”，优先建议先获得该物体的 bbox/关键点（来自用户提供、或由视觉模型估计、或由外部定位 tool 输出），再进行平移/关键帧调整。
 
+关于 prompt（提示词）的生成规则：
+- prompt 是给视频生成模型（Wan）的文本描述，**英文**，描述视频内容：场景、主体、动作、风格。
+- 如果用户用中文描述需求，你应该将其翻译为英文 prompt，并通过 set_generation_params 写入。
+- prompt 示例：
+    "A woman walking on a sunny beach, ocean waves, cinematic lighting, high quality"
+    "A cat jumping from a table, slow motion, detailed fur, 4K"
+    "Aerial view of a city skyline at night, neon lights, cyberpunk style"
+- 不要写无意义的通用词如"masterpiece, best quality"——Wan 模型不需要这些。
+- 如果用户没有提供足够的视觉描述，可以根据 bbox 运动/相机运动/输入图像内容合理推断并补全 prompt。
+
 关键约束（非常重要）：
 - 你 **必须** 始终输出 bbox 和点轨迹（point_json/points），不能省略。
 - 即使你只在处理相机运动，也必须为场景中所有物体生成至少一帧的 bbox 和点轨迹，作为视频生成的条件。

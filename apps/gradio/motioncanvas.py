@@ -943,58 +943,70 @@ def preview_control_video(
             for _ in range(num_frames)
         ]
 
-    bbox_mask = None
-    if bbox_json_text and bbox_json_text.strip():
-        bbox_mask = build_bbox_mask_from_json_str(bbox_json_text, num_frames, height, width)
-
-    bg_tracks = generate_background_tracks(
-        camera_params,
-        num_frames,
-        height,
-        width,
-        bbox_mask=bbox_mask,
-    )
-
     local_tracks = build_point_tracks_from_json(point_json_text, num_frames, height, width)
+
+    # Precompute bbox centers and trajectories for each object
+    obj_trajectories = []
+    for obj in bbox_data.get("objects", []):
+        obj_frames = obj.get("frames", {})
+        centers = []
+        for f in range(num_frames):
+            bbox = _interp_bbox_for_frame(obj_frames, f, width, height)
+            if bbox is None:
+                centers.append(None)
+            else:
+                x1, y1, x2, y2 = bbox
+                centers.append(((x1 + x2) / 2.0, (y1 + y2) / 2.0))
+        obj_trajectories.append(centers)
 
     frames = []
     for frame_idx in range(num_frames):
         img = base_frame.copy()
-        draw = ImageDraw.Draw(img)
+        draw = ImageDraw.Draw(img, "RGBA")
 
-        for obj in bbox_data.get("objects", []):
+        # Draw bbox filled rectangles (semi-transparent) + outlines
+        for obj_idx, obj in enumerate(bbox_data.get("objects", [])):
             obj_frames = obj.get("frames", {})
             bbox = _interp_bbox_for_frame(obj_frames, frame_idx, width, height)
             if bbox is None:
                 continue
             x1, y1, x2, y2 = bbox
-            draw.rectangle([x1, y1, x2, y2], outline=(255, 80, 80), width=3)
+            fill_color = (255, 80, 80, 50)
+            outline_color = (255, 80, 80)
+            draw.rectangle([x1, y1, x2, y2], fill=fill_color, outline=outline_color, width=3)
 
-        for track in bg_tracks:
-            if frame_idx < len(track):
-                x, y = track[frame_idx]
-            else:
-                x, y = track[0]
-            draw.ellipse([x - 2, y - 2, x + 2, y + 2], fill=(80, 160, 255))
+            # Draw trajectory tail (last N frames of bbox center)
+            if obj_idx < len(obj_trajectories):
+                traj = obj_trajectories[obj_idx]
+                tail_len = min(15, frame_idx)
+                for t in range(frame_idx - tail_len, frame_idx):
+                    if t < 0 or traj[t] is None or traj[t + 1] is None:
+                        continue
+                    alpha = int(200 * (1 - (frame_idx - t) / max(tail_len, 1)))
+                    line_color = (255, 200, 80, alpha)
+                    draw.line([traj[t], traj[t + 1]], fill=line_color, width=3)
 
+        # Draw user point trajectories as lines + dots
         if local_tracks is not None:
             params = camera_params[frame_idx] if frame_idx < len(camera_params) else camera_params[0]
             for track in local_tracks:
+                # Draw trajectory tail
+                tail_len = min(15, frame_idx)
+                for t in range(frame_idx - tail_len, frame_idx):
+                    if t < 0 or t + 1 >= len(track):
+                        continue
+                    p1 = track[t]
+                    p2 = track[t + 1]
+                    tp1 = apply_camera_transform_to_point(*p1, width, height, params["zoom"], params["pan_x"], params["pan_y"], params["rotation"])
+                    tp2 = apply_camera_transform_to_point(*p2, width, height, params["zoom"], params["pan_x"], params["pan_y"], params["rotation"])
+                    alpha = int(200 * (1 - (frame_idx - t) / max(tail_len, 1)))
+                    draw.line([tp1, tp2], fill=(80, 160, 255, alpha), width=3)
+
+                # Current point
                 if frame_idx < len(track):
                     x, y = track[frame_idx]
-                else:
-                    x, y = track[0]
-                tx, ty = apply_camera_transform_to_point(
-                    x,
-                    y,
-                    width,
-                    height,
-                    params["zoom"],
-                    params["pan_x"],
-                    params["pan_y"],
-                    params["rotation"],
-                )
-                draw.ellipse([tx - 3, ty - 3, tx + 3, ty + 3], fill=(255, 80, 80))
+                    tx, ty = apply_camera_transform_to_point(x, y, width, height, params["zoom"], params["pan_x"], params["pan_y"], params["rotation"])
+                    draw.ellipse([tx - 5, ty - 5, tx + 5, ty + 5], fill=(80, 160, 255), outline=(255, 255, 255), width=2)
 
         frames.append(img)
 
