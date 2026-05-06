@@ -1308,26 +1308,13 @@ def _reset_editor_canvas(input_image):
 
 
 def _build_fallback_track_video(bbox_json_text, camera_json_text, point_json_text, num_frames, height, width, torch_dtype, device):
-    """Fallback: 当 CoTracker 不可用时，从 bbox 关键帧 + 相机参数 + 点关键帧生成 track_video"""
+    """Fallback: 从 bbox 关键帧生成密集物体轨迹 + 相机背景网格 + 用户点关键帧"""
     camera_params = build_camera_params_from_json(camera_json_text, num_frames)
     if camera_params is None:
         camera_params = [{"zoom": 1.0, "pan_x": 0.0, "pan_y": 0.0, "rotation": 0.0} for _ in range(num_frames)]
 
-    tracks = []
-
-    # 相机背景网格（无 bbox mask 过滤）
-    xs = np.linspace(0, width - 1, 16)
-    ys = np.linspace(0, height - 1, 16)
-    for gx in xs:
-        for gy in ys:
-            track = []
-            for f in range(num_frames):
-                p = camera_params[f]
-                tx, ty = apply_camera_transform_to_point(gx, gy, width, height, p["zoom"], p["pan_x"], p["pan_y"], p["rotation"])
-                track.append((tx, ty))
-            tracks.append(track)
-
-    # bbox 物体中心轨迹
+    # ---- 解析 bbox 关键帧，预计算每帧 bbox 坐标 ----
+    obj_bboxes = []
     if bbox_json_text and bbox_json_text.strip():
         try:
             bbox_data = json.loads(bbox_json_text)
@@ -1335,7 +1322,7 @@ def _build_fallback_track_video(bbox_json_text, camera_json_text, point_json_tex
                 frames = obj.get("frames", {})
                 if not frames:
                     continue
-                kfs = []
+                raw_kfs = []
                 for fi_str, bbox in frames.items():
                     fi = int(fi_str)
                     if fi >= num_frames:
@@ -1344,33 +1331,81 @@ def _build_fallback_track_video(bbox_json_text, camera_json_text, point_json_tex
                     if all(0 <= v <= 1.0 for v in [x1, y1, x2, y2]):
                         x1, x2 = x1 * width, x2 * width
                         y1, y2 = y1 * height, y2 * height
-                    kfs.append((fi, (x1 + x2) / 2.0, (y1 + y2) / 2.0))
-                if not kfs:
+                    raw_kfs.append((fi, x1, y1, x2, y2))
+                if not raw_kfs:
                     continue
-                kfs = sorted(kfs, key=lambda x: x[0])
-                track = []
+                raw_kfs = sorted(raw_kfs, key=lambda x: x[0])
+                per_frame = []
                 for f in range(num_frames):
-                    if f <= kfs[0][0]:
-                        cx, cy = kfs[0][1], kfs[0][2]
-                    elif f >= kfs[-1][0]:
-                        cx, cy = kfs[-1][1], kfs[-1][2]
+                    if f <= raw_kfs[0][0]:
+                        per_frame.append(raw_kfs[0][1:])
+                    elif f >= raw_kfs[-1][0]:
+                        per_frame.append(raw_kfs[-1][1:])
                     else:
-                        for idx in range(len(kfs) - 1):
-                            f0, cx0, cy0 = kfs[idx]
-                            f1, cx1, cy1 = kfs[idx + 1]
+                        for idx in range(len(raw_kfs) - 1):
+                            f0, *b0 = raw_kfs[idx]
+                            f1, *b1 = raw_kfs[idx + 1]
                             if f0 <= f <= f1:
                                 t = (f - f0) / max(1, f1 - f0)
-                                cx = cx0 + (cx1 - cx0) * t
-                                cy = cy0 + (cy1 - cy0) * t
+                                per_frame.append(tuple(b0[j] + (b1[j] - b0[j]) * t for j in range(4)))
                                 break
-                    p = camera_params[f]
-                    tx, ty = apply_camera_transform_to_point(cx, cy, width, height, p["zoom"], p["pan_x"], p["pan_y"], p["rotation"])
-                    track.append((tx, ty))
-                tracks.append(track)
+                obj_bboxes.append(per_frame)
         except Exception:
             pass
 
-    # 用户点关键帧轨迹
+    # ---- 合并所有 bbox 区域 mask（用于过滤背景网格） ----
+    obj_mask = np.zeros((height, width), dtype=bool)
+    for per_frame in obj_bboxes:
+        x1, y1, x2, y2 = per_frame[0]
+        x1, x2 = int(max(0, min(width, round(x1)))), int(max(0, min(width, round(x2))))
+        y1, y2 = int(max(0, min(height, round(y1)))), int(max(0, min(height, round(y2))))
+        if x2 > x1 and y2 > y1:
+            obj_mask[y1:y2, x1:x2] = True
+
+    tracks = []
+
+    # ---- 1. 背景网格（排除 bbox 区域） ----
+    grid_size = 16
+    xs = np.linspace(0, width - 1, grid_size)
+    ys = np.linspace(0, height - 1, grid_size)
+    for gx in xs:
+        for gy in ys:
+            if obj_mask[int(round(gy)), int(round(gx))]:
+                continue
+            track = []
+            for f in range(num_frames):
+                p = camera_params[f]
+                tx, ty = apply_camera_transform_to_point(gx, gy, width, height, p["zoom"], p["pan_x"], p["pan_y"], p["rotation"])
+                track.append((tx, ty))
+            tracks.append(track)
+
+    # ---- 2. bbox 物体密集轨迹 ----
+    for per_frame in obj_bboxes:
+        x1_0, y1_0, x2_0, y2_0 = per_frame[0]
+        bw0 = max(x2_0 - x1_0, 1)
+        bh0 = max(y2_0 - y1_0, 1)
+        # 在第一个 bbox 内生成密集网格点
+        grid_obj = 6
+        oxs = np.linspace(x1_0, x2_0, grid_obj)
+        oys = np.linspace(y1_0, y2_0, grid_obj)
+        for ox in oxs:
+            for oy in oys:
+                # 该点在第一帧 bbox 中的相对位置 (0~1)
+                rx = (ox - x1_0) / bw0
+                ry = (oy - y1_0) / bh0
+                track = []
+                for f in range(num_frames):
+                    x1, y1, x2, y2 = per_frame[f]
+                    bw = max(x2 - x1, 1)
+                    bh = max(y2 - y1, 1)
+                    px = x1 + rx * bw
+                    py = y1 + ry * bh
+                    p = camera_params[f]
+                    tx, ty = apply_camera_transform_to_point(px, py, width, height, p["zoom"], p["pan_x"], p["pan_y"], p["rotation"])
+                    track.append((tx, ty))
+                tracks.append(track)
+
+    # ---- 3. 用户点关键帧轨迹 ----
     local_tracks = build_point_tracks_from_json(point_json_text, num_frames, height, width)
     if local_tracks is not None:
         for track in local_tracks:
