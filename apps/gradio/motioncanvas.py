@@ -464,6 +464,67 @@ def compute_track_video(
             camera_applied_tracks.append(cam_track)
 
     all_tracks = background_tracks + camera_applied_tracks
+
+    if bbox_json_text and bbox_json_text.strip():
+        try:
+            bbox_data = json.loads(bbox_json_text)
+            objects = bbox_data.get("objects", [])
+            for obj in objects:
+                frames = obj.get("frames", {})
+                if not frames:
+                    continue
+                keyframes = []
+                for fi_str, bbox in frames.items():
+                    fi = int(fi_str)
+                    if fi >= int(num_frames):
+                        continue
+                    x1, y1, x2, y2 = bbox
+                    if all(0 <= v <= 1.0 for v in [x1, y1, x2, y2]):
+                        x1, x2 = x1 * int(width), x2 * int(width)
+                        y1, y2 = y1 * int(height), y2 * int(height)
+                    keyframes.append((fi, float(x1), float(y1), float(x2), float(y2)))
+                if not keyframes:
+                    continue
+                keyframes = sorted(keyframes, key=lambda x: x[0])
+
+                def interp_bbox(f):
+                    if f <= keyframes[0][0]:
+                        return keyframes[0][1:]
+                    if f >= keyframes[-1][0]:
+                        return keyframes[-1][1:]
+                    for idx in range(len(keyframes) - 1):
+                        f0, *b0 = keyframes[idx]
+                        f1, *b1 = keyframes[idx + 1]
+                        if f0 <= f <= f1:
+                            span = max(1, f1 - f0)
+                            t = (f - f0) / span
+                            return tuple(b0[j] + (b1[j] - b0[j]) * t for j in range(4))
+                    return keyframes[-1][1:]
+
+                for ref_point in ["center", "tl", "tr", "bl", "br"]:
+                    track = []
+                    for f in range(int(num_frames)):
+                        x1, y1, x2, y2 = interp_bbox(f)
+                        if ref_point == "center":
+                            px, py = (x1 + x2) / 2.0, (y1 + y2) / 2.0
+                        elif ref_point == "tl":
+                            px, py = x1, y1
+                        elif ref_point == "tr":
+                            px, py = x2, y1
+                        elif ref_point == "bl":
+                            px, py = x1, y2
+                        else:
+                            px, py = x2, y2
+                        params = camera_params[f]
+                        tx, ty = apply_camera_transform_to_point(
+                            px, py, int(width), int(height),
+                            params["zoom"], params["pan_x"], params["pan_y"], params["rotation"],
+                        )
+                        track.append((tx, ty))
+                    all_tracks.append(track)
+        except Exception as e:
+            print(f"Bbox trajectory tracks failed: {e}")
+
     if not all_tracks:
         return None
 
