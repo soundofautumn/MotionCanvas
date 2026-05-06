@@ -456,7 +456,7 @@ class WanVideoPipeline_motioncanvas(BasePipeline):
             prompt_emb_nega = self.encode_prompt([negative_prompt] * len(prompt), positive=False)
         
         bbox_latents, traj_video, track_info = self.prepare_motioncanvas_kwargs(
-            video_rgb=video_rgb,
+            video_rgb=None,
             video_frame_num=49,
             bbox_mask=bbox_mask,
             reference_imgs_indicator=reference_imgs_indicator,
