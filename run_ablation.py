@@ -354,7 +354,7 @@ def run_experiment(pipe, exp, defaults, llm_cfg, output_dir, skip_llm):
         params["point_json"] = r["point_json"]
         if r["prompt"]:
             params["prompt"] = r["prompt"]
-        tc_count = sum(len(r["calls"]) for r in r["tool_rounds"])
+        tc_count = sum(len(r.get("calls", [])) for r in r["tool_rounds"])
         llm_log = {
             "instruction": exp["llm_instruction"],
             "model": llm_cfg["model"],
