@@ -62,16 +62,16 @@ experiments:
 
   - name: 05_cat_llm
     image: data/input_img/cat.png
-    llm_instruction: "a silver tabby cat with white chest lying on a pink cushion by a window, soft daylight, shallow depth of field. The cat slowly raises its head and turns slightly to the right, small ear twitch. Camera remains static."
+    llm_instruction: "a cat lying by a window on a cushion, soft daylight. The cat slowly lifts its head and turns slightly to the right. Camera stays still."
 
   - name: 06_cat2_llm
     image: data/input_img/cat2.png
-    llm_instruction: "a tabby cat sitting on a stone ledge in a lush garden, green bushes and soft bokeh. The cat looks left, then turns to face forward and shifts its posture slightly, tail resting on the ledge. Camera static."
+    llm_instruction: "a cat sitting on a stone ledge in a garden. The cat looks left, then faces forward and shifts a little. Camera static."
 
   - name: 07_bear_llm
     image: data/input_img/bear.jpg
-    llm_instruction: "a brown bear in a forest clearing beside a calm lake, warm golden hour light and misty background. The bear takes a few slow steps forward from left to right, head slightly lowered. Camera gently zooms in."
+    llm_instruction: "a bear in a forest near a lake. The bear walks slowly from left to right. Camera gently zooms in."
 
   - name: 08_woman_llm
     image: data/input_img/woman.png
-    llm_instruction: "a young woman with long brown hair and sunglasses, holding a DSLR camera, standing near a large white cruise ship under bright blue sky. She smiles and turns her head slightly to the left while adjusting the camera in her hands. Camera slow push-in."
+    llm_instruction: "a woman holding a camera near a large cruise ship on a sunny day. She smiles and turns her head slightly left. Camera slow push-in."
