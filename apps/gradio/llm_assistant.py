@@ -647,6 +647,20 @@ def _print_llm_debug(resp: Dict[str, Any]) -> None:
 _LLM_TOOL_LOG: List[Dict[str, Any]] = []
 
 
+def _deep_parse_json(obj):
+    """递归遍历，将 JSON 字符串全部解析为实际对象。"""
+    if isinstance(obj, str):
+        try:
+            return _deep_parse_json(json.loads(obj))
+        except (json.JSONDecodeError, ValueError):
+            return obj
+    if isinstance(obj, dict):
+        return {k: _deep_parse_json(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_deep_parse_json(v) for v in obj]
+    return obj
+
+
 def clear_llm_tool_log() -> None:
     _LLM_TOOL_LOG.clear()
 
@@ -667,7 +681,7 @@ def _log_tool_round(round_idx: int, tool_calls: List[dict], tool_results: List[d
         calls.append({
             "id": tc.get("id"),
             "name": fn.get("name"),
-            "arguments": parsed_args,
+            "arguments": _deep_parse_json(parsed_args),
         })
     results = []
     for tr in tool_results:
@@ -678,7 +692,7 @@ def _log_tool_round(round_idx: int, tool_calls: List[dict], tool_results: List[d
             pass
         results.append({
             "id": tr.get("tool_call_id"),
-            "content": content,
+            "content": _deep_parse_json(content),
         })
     _LLM_TOOL_LOG.append({
         "round": round_idx,
@@ -692,8 +706,8 @@ def _log_fallback_ops(ops: list, updates: dict) -> None:
     _LLM_TOOL_LOG.append({
         "round": 0,
         "type": "fallback_ops",
-        "ops": ops,
-        "updates": updates,
+        "ops": _deep_parse_json(ops),
+        "updates": _deep_parse_json(updates),
     })
 
 
@@ -2986,6 +3000,25 @@ def llm_apply_instruction(
     cam_zoom_v, cam_pan_x_v, cam_pan_y_v, cam_rot_v = _camera_values_for_frame(new_camera_state, new_frame_val)
     bbox_canvas_v = gr.update()
     point_canvas_v = gr.update()
+
+    # ── Final result log (always recorded) ──
+    try:
+        _LLM_TOOL_LOG.append({
+            "round": _LLM_TOOL_LOG[-1]["round"] + 1 if _LLM_TOOL_LOG else 0,
+            "type": "final_result",
+            "bbox_json": _deep_parse_json(json.loads(new_bbox_json)) if new_bbox_json else None,
+            "camera_json": _deep_parse_json(json.loads(new_camera_json)) if new_camera_json else None,
+            "point_json": _deep_parse_json(json.loads(new_point_json)) if new_point_json else None,
+            "prompt": new_prompt,
+            "gen_params": {
+                "height": new_height, "width": new_width,
+                "num_frames": new_num_frames, "fps": new_fps,
+                "num_inference_steps": new_steps, "cfg_scale": new_cfg,
+                "sigma_shift": new_sigma, "seed": new_seed,
+            },
+        })
+    except Exception:
+        pass
 
     return (
         history,
