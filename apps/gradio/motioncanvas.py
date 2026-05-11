@@ -1661,7 +1661,7 @@ with gr.Blocks(
                             )
 
                         gr.Markdown("### 物体运动（Bbox）", elem_classes="section-title")
-                        gr.Markdown("请通过 **LLM 助手** 或下方 **JSON / 高级选项** 手动编辑 bbox 数据。ImageEditor 因 Gradio [#12058](https://github.com/gradio-app/gradio/issues/12058) 已知 bug 暂时禁用。", elem_classes="kf-label")
+                        # gr.Markdown("请通过 **LLM 助手** 或下方 **JSON / 高级选项** 手动编辑 bbox 数据。ImageEditor 因 Gradio [#12058](https://github.com/gradio-app/gradio/issues/12058) 已知 bug 暂时禁用。", elem_classes="kf-label")
                         bbox_kf_state = gr.State({})
                         bbox_preview = gr.Image(
                             label="起始帧预览",
@@ -1671,7 +1671,7 @@ with gr.Blocks(
                         )
 
                         gr.Markdown("### 局部运动（点轨迹）", elem_classes="section-title")
-                        gr.Markdown("请通过 **LLM 助手** 或下方 **JSON / 高级选项** 手动编辑点轨迹数据。ImageEditor 因 Gradio [#12058](https://github.com/gradio-app/gradio/issues/12058) 已知 bug 暂时禁用。", elem_classes="kf-label")
+                        # gr.Markdown("请通过 **LLM 助手** 或下方 **JSON / 高级选项** 手动编辑点轨迹数据。ImageEditor 因 Gradio [#12058](https://github.com/gradio-app/gradio/issues/12058) 已知 bug 暂时禁用。", elem_classes="kf-label")
                         point_kf_state = gr.State({})
                         point_preview = gr.Image(
                             label="起始帧预览",
