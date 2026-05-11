@@ -2,8 +2,10 @@ model:
   dit_path: /root/autodl-tmp/models/wan_1.3b/diffusion_pytorch_model.safetensors
   vae_path: /root/autodl-tmp/models/wan_1.3b/Wan2.1_VAE.pth
   text_encoder_path: /root/autodl-tmp/models/wan_1.3b/models_t5_umt5-xxl-enc-bf16.pth
-  image_encoder_path: /root/autodl-tmp/models/wan_1.3b/Wan2.1_ImageEncoder.pth
-  checkpoint_path: /root/autodl-tmp/models/motioncanvas_checkpoint.pt
+  image_encoder_path: /root/autodl-tmp/models/wan_1.3b/models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth
+  motion_controller_path: /root/autodl-tmp/models/DiffSynth-Studio/Wan2.1-1.3b-speedcontrol-v1/model.safetensors
+  vace_dir: /root/autodl-tmp/models/iic/VACE-Wan2.1-1.3B-Preview
+  checkpoint_path: /root/autodl-tmp/models/motioncanvas/model.pt
 
 defaults:
   height: 480
@@ -19,17 +21,16 @@ llm:
   base_url: https://api.siliconflow.cn/v1
   api_key: ${API_KEY}
   model: Pro/moonshotai/Kimi-K2.5
-  timeout: 120
+  timeout: 60
   send_image: true
-  gdino_model_dir: /root/autodl-tmp/models/GroundingDINO
-  sam_ckpt: /root/autodl-tmp/models/sam_vit_h_4b8939.pth
+  gdino_model_dir: /root/autodl-tmp/models/grounding_dino/GroundingDINO
+  sam_ckpt: /root/autodl-tmp/models/segment_anything/sam_vit_h_4b8939.pth
   sam_type: vit_h
 
 experiments:
   # ════════════════════════════════════════════
-  # Direct 模式：手工预设参数（保持条件一致，只改一个变量）
-  # 用于跟 LLM 模式对比：同一张图 + 同一条指令，
-  # 手工 vs LLM 生成的运动参数，哪个效果更好。
+  # Direct 模式：同一张图、同一 prompt，只改一个变量
+  # 用于消融对比：控制信号 / prompt / seed
   # ════════════════════════════════════════════
 
   - name: 01_cat_direct_bbox_only

@@ -129,24 +129,43 @@ def load_checkpoint_weights(pipe, checkpoint_path, device="cpu"):
 
 
 def build_pipeline(cfg):
-    model_cfg = cfg["model"]
+    """
+    完全遵循 apps/gradio/motioncanvas.py 的 load_models 逻辑。
+    - dit / vae / text_encoder 为必需
+    - image_encoder / motion_controller / vace / checkpoint 均为可选
+    """
+    mc = cfg["model"]
     torch_dtype = torch.bfloat16
     device = "cuda"
 
-    model_paths = [
-        model_cfg["text_encoder_path"],
-        model_cfg["vae_path"],
-        model_cfg["dit_path"],
-    ]
-    iep = model_cfg.get("image_encoder_path")
-    if iep:
-        if not os.path.exists(iep):
-            raise FileNotFoundError(f"image_encoder_path not found: {iep}")
+    # 必需模型检查
+    required = [("dit_path", mc["dit_path"]), ("vae_path", mc["vae_path"]),
+                ("text_encoder_path", mc["text_encoder_path"])]
+    for name, p in required:
+        if not p or not os.path.exists(p):
+            raise FileNotFoundError(f"{name} not found: {p}")
+
+    model_paths = [mc["text_encoder_path"], mc["vae_path"], mc["dit_path"]]
+
+    iep = mc.get("image_encoder_path")
+    if iep and os.path.exists(iep):
         model_paths.append(iep)
 
-    for p in model_paths:
-        if not os.path.exists(p):
-            raise FileNotFoundError(f"model file not found: {p}")
+    mcp = mc.get("motion_controller_path")
+    if mcp and os.path.exists(mcp):
+        model_paths.append(mcp)
+
+    vace_dir = mc.get("vace_dir")
+    if vace_dir and os.path.isdir(vace_dir):
+        vace_files = [
+            os.path.join(vace_dir, "diffusion_pytorch_model.safetensors"),
+            os.path.join(vace_dir, "models_t5_umt5-xxl-enc-bf16.pth"),
+            os.path.join(vace_dir, "Wan2.1_VAE.pth"),
+        ]
+        missing = [f for f in vace_files if not os.path.exists(f)]
+        if missing:
+            raise FileNotFoundError(f"VACE files missing: {missing}")
+        model_paths.extend(vace_files)
 
     t0 = time.time()
     print("Loading model manager...")
@@ -159,10 +178,8 @@ def build_pipeline(cfg):
         model_manager, torch_dtype=torch_dtype, device=device
     )
 
-    ckpt = model_cfg.get("checkpoint_path")
-    if ckpt:
-        if not os.path.exists(ckpt):
-            raise FileNotFoundError(f"checkpoint_path not found: {ckpt}")
+    ckpt = mc.get("checkpoint_path")
+    if ckpt and os.path.exists(ckpt):
         pipe = load_checkpoint_weights(pipe, ckpt, device="cpu")
         pipe.bbox_zeroconv = pipe.bbox_zeroconv.to(dtype=torch_dtype, device=device)
 
