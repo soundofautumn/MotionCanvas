@@ -1,0 +1,19 @@
+{
+  "prompt": "a woman walking on a street, soft natural lighting, shallow depth of field, cinematic shot, high quality",
+  "has_bbox": true,
+  "has_camera": true,
+  "has_point": true,
+  "bbox_json": "{\n  \"objects\": [\n    {\n      \"frames\": {\n        \"0\": [\n          0.3475,\n          0.2481,\n          0.646,\n          0.9945\n        ],\n        \"48\": [\n          0.0,\n          0.2481,\n          0.046,\n          0.9945\n        ]\n      }\n    }\n  ]\n}",
+  "camera_json": "{\n  \"camera\": {\n    \"keyframes\": [\n      {\n        \"frame\": 0,\n        \"zoom\": 1.0,\n        \"pan\": [\n          0.0,\n          0.0\n        ],\n        \"rotation\": 0.0\n      },\n      {\n        \"frame\": 48,\n        \"zoom\": 1.8,\n        \"pan\": [\n          50.0,\n          -30.0\n        ],\n        \"rotation\": 0.0\n      }\n    ]\n  }\n}",
+  "point_json": "{\n  \"points\": [\n    {\n      \"frames\": {\n        \"0\": [\n          0.4967,\n          0.6213\n        ]\n      }\n    }\n  ]\n}",
+  "gen_params": {
+    "height": 480,
+    "width": 832,
+    "num_frames": 49,
+    "num_inference_steps": 50,
+    "cfg_scale": 5.0,
+    "sigma_shift": 5.0,
+    "seed": 42,
+    "fps": 15
+  }
+}

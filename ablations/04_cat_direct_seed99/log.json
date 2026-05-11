@@ -1,0 +1,29 @@
+{
+  "experiment": "04_cat_direct_seed99",
+  "timestamp": "2026-05-11T07:15:29+00:00",
+  "image": "data/input_img/cat.png",
+  "instruction": "",
+  "prompt": "",
+  "seed": 99,
+  "mode": "direct",
+  "llm": null,
+  "signal_building": {
+    "duration_sec": 0.44,
+    "has_bbox_mask": true,
+    "has_track_video": true
+  },
+  "generation": {
+    "duration_sec": 510.33,
+    "num_frames": 49,
+    "num_inference_steps": 50,
+    "width": 832,
+    "height": 480,
+    "cfg_scale": 5.0,
+    "sigma_shift": 5.0,
+    "seed": 99,
+    "fps": 15,
+    "success": true
+  },
+  "total_duration_sec": 511.93,
+  "error": null
+}

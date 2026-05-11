@@ -1,0 +1,19 @@
+{
+  "prompt": "a cat walking on a sunny beach, cinematic lighting, ocean waves, detailed fur, high quality",
+  "has_bbox": true,
+  "has_camera": false,
+  "has_point": true,
+  "bbox_json": "{\n  \"objects\": [\n    {\n      \"frames\": {\n        \"0\": [\n          0.09,\n          0.0436,\n          0.877,\n          0.715\n        ],\n        \"48\": [\n          0.69,\n          0.0436,\n          1.0,\n          0.715\n        ]\n      }\n    }\n  ]\n}",
+  "camera_json": "",
+  "point_json": "{\n  \"points\": [\n    {\n      \"frames\": {\n        \"0\": [\n          0.4835,\n          0.3793\n        ]\n      }\n    },\n    {\n      \"frames\": {\n        \"48\": [\n          1.0,\n          0.3793\n        ]\n      }\n    }\n  ]\n}",
+  "gen_params": {
+    "height": 480,
+    "width": 832,
+    "num_frames": 49,
+    "num_inference_steps": 50,
+    "cfg_scale": 5.0,
+    "sigma_shift": 5.0,
+    "seed": 42,
+    "fps": 15
+  }
+}

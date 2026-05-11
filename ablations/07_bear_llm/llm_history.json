@@ -1,0 +1,10 @@
+[
+  {
+    "role": "user",
+    "content": "a bear walking in a forest, sunlight through trees, the bear walks from left to right, camera zooms in slightly"
+  },
+  {
+    "role": "assistant",
+    "content": "已完成所有设置！现在可以生成视频了：\n\n**设置摘要：**\n- **Prompt**: \"A bear walking in a forest, sunlight through trees, cinematic lighting, high quality, detailed fur, natural environment\"\n- **相机运动**: 从第0帧到第48帧，zoom从1.0缓慢放大到1.2（轻微放大效果）\n- **熊的运动**: \n  - Bbox从画面左侧 (x=0.15) 平滑移动到右侧 (x=0.95)\n  - 点轨迹（熊的中心点）同步从左向右移动\n- **视频参数**: 49帧，15fps，分辨率832x480\n\n熊会从左向右走过森林，同时相机轻微放大，营造出阳光透过树林的 cinematic 效果。"
+  }
+]

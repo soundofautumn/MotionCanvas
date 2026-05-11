@@ -1,0 +1,10 @@
+[
+  {
+    "role": "user",
+    "content": "a cat walking on a sunny beach, cinematic lighting, the cat walks from left to right"
+  },
+  {
+    "role": "assistant",
+    "content": "已完成所有配置！🎬\n\n**设置摘要：**\n- **Prompt**: \"a cat walking on a sunny beach, cinematic lighting, ocean waves, detailed fur, high quality\"\n- **猫咪运动**: 从左向右行走\n  - Bbox: 从画面左侧 (x=0.09) 平滑移动到右侧 (x=0.69)\n  - 轨迹点: 从中心位置向右移动\n- **视频参数**: 49帧, 15fps, 480x832分辨率\n\n现在可以开始生成视频了！模型会根据这些条件生成一只猫咪在阳光海滩上从左向右行走的画面。"
+  }
+]

@@ -1,0 +1,36 @@
+{
+  "experiment": "08_woman_llm",
+  "timestamp": "2026-05-11T07:51:51+00:00",
+  "image": "data/input_img/woman.png",
+  "instruction": "a woman walking on a street, soft natural lighting, shallow depth of field, the woman walks from right to left, camera slowly zooms in on her face",
+  "prompt": "a woman walking on a street, soft natural lighting, shallow depth of field, cinematic shot, high quality",
+  "seed": 42,
+  "mode": "llm",
+  "llm": {
+    "instruction": "a woman walking on a street, soft natural lighting, shallow depth of field, the woman walks from right to left, camera slowly zooms in on her face",
+    "model": "Pro/moonshotai/Kimi-K2.5",
+    "duration_sec": 29.04,
+    "status": "✅ 已应用 LLM 更新",
+    "tool_calls": [],
+    "error": null
+  },
+  "signal_building": {
+    "duration_sec": 0.38,
+    "has_bbox_mask": true,
+    "has_track_video": true
+  },
+  "generation": {
+    "duration_sec": 510.85,
+    "num_frames": 49,
+    "num_inference_steps": 50,
+    "width": 832,
+    "height": 480,
+    "cfg_scale": 5.0,
+    "sigma_shift": 5.0,
+    "seed": 42,
+    "fps": 15,
+    "success": true
+  },
+  "total_duration_sec": 541.31,
+  "error": null
+}

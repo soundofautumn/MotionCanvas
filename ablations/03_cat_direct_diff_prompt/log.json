@@ -1,0 +1,29 @@
+{
+  "experiment": "03_cat_direct_diff_prompt",
+  "timestamp": "2026-05-11T07:06:57+00:00",
+  "image": "data/input_img/cat.png",
+  "instruction": "",
+  "prompt": "",
+  "seed": 42,
+  "mode": "direct",
+  "llm": null,
+  "signal_building": {
+    "duration_sec": 0.45,
+    "has_bbox_mask": true,
+    "has_track_video": true
+  },
+  "generation": {
+    "duration_sec": 510.32,
+    "num_frames": 49,
+    "num_inference_steps": 50,
+    "width": 832,
+    "height": 480,
+    "cfg_scale": 5.0,
+    "sigma_shift": 5.0,
+    "seed": 42,
+    "fps": 15,
+    "success": true
+  },
+  "total_duration_sec": 511.97,
+  "error": null
+}

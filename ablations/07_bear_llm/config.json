@@ -1,0 +1,19 @@
+{
+  "prompt": "A bear walking in a forest, sunlight through trees, cinematic lighting, high quality, detailed fur, natural environment",
+  "has_bbox": true,
+  "has_camera": true,
+  "has_point": true,
+  "bbox_json": "{\n  \"objects\": [\n    {\n      \"frames\": {\n        \"0\": [\n          0.1525,\n          0.574,\n          0.4105,\n          0.6893\n        ],\n        \"48\": [\n          0.9525,\n          0.574,\n          1.0,\n          0.6893\n        ]\n      }\n    }\n  ]\n}",
+  "camera_json": "{\n  \"camera\": {\n    \"keyframes\": [\n      {\n        \"frame\": 0,\n        \"zoom\": 1.0,\n        \"pan\": [\n          0.0,\n          0.0\n        ],\n        \"rotation\": 0.0\n      },\n      {\n        \"frame\": 48,\n        \"zoom\": 1.2,\n        \"pan\": [\n          0.0,\n          0.0\n        ],\n        \"rotation\": 0.0\n      }\n    ]\n  }\n}",
+  "point_json": "{\n  \"points\": [\n    {\n      \"frames\": {\n        \"0\": [\n          0.2815,\n          0.6317\n        ]\n      }\n    },\n    {\n      \"frames\": {\n        \"48\": [\n          1.0,\n          0.6317\n        ]\n      }\n    }\n  ]\n}",
+  "gen_params": {
+    "height": 480,
+    "width": 832,
+    "num_frames": 49,
+    "num_inference_steps": 50,
+    "cfg_scale": 5.0,
+    "sigma_shift": 5.0,
+    "seed": 42,
+    "fps": 15
+  }
+}

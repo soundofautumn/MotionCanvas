@@ -1,0 +1,19 @@
+{
+  "prompt": "A tabby cat walking from left to center of the frame, smooth movement, natural gait, garden background with green foliage, soft natural lighting, high quality video",
+  "has_bbox": true,
+  "has_camera": false,
+  "has_point": true,
+  "bbox_json": "{\n  \"objects\": [\n    {\n      \"frames\": {\n        \"0\": [\n          0.28,\n          0.3035,\n          0.583,\n          0.9814\n        ],\n        \"48\": [\n          0.38,\n          0.3035,\n          0.683,\n          0.9814\n        ]\n      }\n    }\n  ]\n}",
+  "camera_json": "",
+  "point_json": "{\n  \"points\": [\n    {\n      \"frames\": {\n        \"0\": [\n          0.4315,\n          0.6746\n        ],\n        \"48\": [\n          0.5315,\n          0.6746\n        ]\n      }\n    }\n  ]\n}",
+  "gen_params": {
+    "height": 480,
+    "width": 832,
+    "num_frames": 49,
+    "num_inference_steps": 50,
+    "cfg_scale": 5.0,
+    "sigma_shift": 5.0,
+    "seed": 42,
+    "fps": 15
+  }
+}

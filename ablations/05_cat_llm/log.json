@@ -1,0 +1,36 @@
+{
+  "experiment": "05_cat_llm",
+  "timestamp": "2026-05-11T07:24:01+00:00",
+  "image": "data/input_img/cat.png",
+  "instruction": "a cat walking on a sunny beach, cinematic lighting, the cat walks from left to right",
+  "prompt": "a cat walking on a sunny beach, cinematic lighting, ocean waves, detailed fur, high quality",
+  "seed": 42,
+  "mode": "llm",
+  "llm": {
+    "instruction": "a cat walking on a sunny beach, cinematic lighting, the cat walks from left to right",
+    "model": "Pro/moonshotai/Kimi-K2.5",
+    "duration_sec": 29.08,
+    "status": "✅ 已应用 LLM 更新",
+    "tool_calls": [],
+    "error": null
+  },
+  "signal_building": {
+    "duration_sec": 0.37,
+    "has_bbox_mask": true,
+    "has_track_video": true
+  },
+  "generation": {
+    "duration_sec": 510.28,
+    "num_frames": 49,
+    "num_inference_steps": 50,
+    "width": 832,
+    "height": 480,
+    "cfg_scale": 5.0,
+    "sigma_shift": 5.0,
+    "seed": 42,
+    "fps": 15,
+    "success": true
+  },
+  "total_duration_sec": 540.99,
+  "error": null
+}

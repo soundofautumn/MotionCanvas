@@ -1,0 +1,9 @@
+experiment,mode,image,prompt,seed,llm_duration,llm_tool_calls,llm_status,signal_duration,gen_duration,gen_success,total_duration
+01_cat_direct_bbox_only,direct,data/input_img/cat.png,,42,,0,,0.42,509.52,True,511.18
+02_cat_direct_bbox_camera,direct,data/input_img/cat.png,,42,,0,,0.38,510.78,True,512.38
+03_cat_direct_diff_prompt,direct,data/input_img/cat.png,,42,,0,,0.45,510.32,True,511.97
+04_cat_direct_seed99,direct,data/input_img/cat.png,,99,,0,,0.44,510.33,True,511.93
+05_cat_llm,llm,data/input_img/cat.png,"a cat walking on a sunny beach, cinematic lighting, ocean waves, detailed fur, high quality",42,29.08,0,✅ 已应用 LLM 更新,0.37,510.28,True,540.99
+06_cat2_llm,llm,data/input_img/cat2.png,"A tabby cat walking from left to center of the frame, smooth movement, natural gait, garden background with green foliage, soft natural lighting, high quality video",42,68.24,0,✅ 已应用 LLM 更新,0.48,511.23,True,581.02
+07_bear_llm,llm,data/input_img/bear.jpg,"A bear walking in a forest, sunlight through trees, cinematic lighting, high quality, detailed fur, natural environment",42,36.58,0,✅ 已应用 LLM 更新,0.47,510.18,True,548.34
+08_woman_llm,llm,data/input_img/woman.png,"a woman walking on a street, soft natural lighting, shallow depth of field, cinematic shot, high quality",42,29.04,0,✅ 已应用 LLM 更新,0.38,510.85,True,541.31
