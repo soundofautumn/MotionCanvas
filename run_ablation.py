@@ -503,7 +503,7 @@ def run_experiment(pipe, exp, defaults, llm_cfg, output_dir, skip_llm):
 def main():
     parser = argparse.ArgumentParser(description="MotionCanvas 批量消融实验")
     parser.add_argument("--config", required=True, help="实验配置文件 (.json / .yaml)")
-    parser.add_argument("--output_dir", default="./ablations", help="输出目录")
+    parser.add_argument("--output_dir", default="./ablation_results", help="输出目录")
     parser.add_argument("--skip_llm", action="store_true", help="跳过 LLM 调用")
     parser.add_argument("--resume", help="从指定实验名开始")
     args = parser.parse_args()
