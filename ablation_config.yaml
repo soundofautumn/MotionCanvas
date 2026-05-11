@@ -1,0 +1,73 @@
+model:
+  dit_path: /root/autodl-tmp/models/wan_1.3b/diffusion_pytorch_model.safetensors
+  vae_path: /root/autodl-tmp/models/wan_1.3b/Wan2.1_VAE.pth
+  text_encoder_path: /root/autodl-tmp/models/wan_1.3b/models_t5_umt5-xxl-enc-bf16.pth
+  image_encoder_path: /root/autodl-tmp/models/wan_1.3b/Wan2.1_ImageEncoder.pth
+  checkpoint_path: /root/autodl-tmp/models/motioncanvas_checkpoint.pt
+
+defaults:
+  height: 480
+  width: 832
+  num_frames: 49
+  num_inference_steps: 50
+  cfg_scale: 5.0
+  sigma_shift: 5.0
+  seed: 42
+  fps: 15
+  negative_prompt: "Bright tones, overexposed, static, blurred details, subtitles, style, paintings, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, deformed, disfigured, still picture, messy background"
+
+llm:
+  base_url: https://api.siliconflow.cn/v1
+  api_key: ${API_KEY}
+  model: Pro/moonshotai/Kimi-K2.5
+  timeout: 120
+
+experiments:
+  # ────────── cat.png（1280×960 大猫）──────────
+  - name: 01_cat_baseline
+    image: data/input_img/cat.png
+    prompt: "a cat walking on a sunny beach, ocean waves, cinematic lighting"
+    bbox_json: '{"objects": [{"frames": {"0": [0.1, 0.25, 0.4, 0.8], "24": [0.55, 0.25, 0.85, 0.8]}}]}'
+    camera_json: '{"camera": {"keyframes": [{"frame": 0, "zoom": 1.0, "pan": [0, 0], "rotation": 0}]}}'
+
+  - name: 02_cat_no_camera
+    image: data/input_img/cat.png
+    prompt: "a cat walking on a sunny beach, ocean waves, cinematic lighting"
+    bbox_json: '{"objects": [{"frames": {"0": [0.1, 0.25, 0.4, 0.8], "24": [0.55, 0.25, 0.85, 0.8]}}]}'
+
+  - name: 03_cat_big_camera_zoom
+    image: data/input_img/cat.png
+    prompt: "a cat walking on a sunny beach, ocean waves, cinematic lighting"
+    bbox_json: '{"objects": [{"frames": {"0": [0.1, 0.25, 0.4, 0.8], "24": [0.55, 0.25, 0.85, 0.8]}}]}'
+    camera_json: '{"camera": {"keyframes": [{"frame": 0, "zoom": 1.0, "pan": [0, 0], "rotation": 0}, {"frame": 24, "zoom": 1.4, "pan": [0, 0], "rotation": 0}]}}'
+
+  - name: 04_cat_different_prompt
+    image: data/input_img/cat.png
+    prompt: "a cat walking in a dark alley, neon lights reflecting on wet ground, cyberpunk style"
+    bbox_json: '{"objects": [{"frames": {"0": [0.1, 0.25, 0.4, 0.8], "24": [0.55, 0.25, 0.85, 0.8]}}]}'
+
+  - name: 05_cat_seed_99
+    image: data/input_img/cat.png
+    prompt: "a cat walking on a sunny beach, ocean waves, cinematic lighting"
+    bbox_json: '{"objects": [{"frames": {"0": [0.1, 0.25, 0.4, 0.8], "24": [0.55, 0.25, 0.85, 0.8]}}]}'
+    camera_json: '{"camera": {"keyframes": [{"frame": 0, "zoom": 1.0, "pan": [0, 0], "rotation": 0}]}}'
+    seed: 99
+
+  # ────────── cat2.png（640×352 小猫）──────────
+  - name: 06_cat2_llm
+    image: data/input_img/cat2.png
+    prompt: "a cat walking on a sunny beach, ocean waves, cinematic lighting"
+    llm_instruction: "The cat is on the left side looking right, then walks to the center of the frame"
+
+  # ────────── bear.jpg（640×352 熊）──────────
+  - name: 07_bear_baseline
+    image: data/input_img/bear.jpg
+    prompt: "a bear walking in a forest, sunlight through trees, cinematic"
+    bbox_json: '{"objects": [{"frames": {"0": [0.15, 0.2, 0.5, 0.85], "24": [0.5, 0.2, 0.85, 0.85]}}]}'
+    camera_json: '{"camera": {"keyframes": [{"frame": 0, "zoom": 1.0, "pan": [0, 0], "rotation": 0}]}}'
+
+  # ────────── woman.png（640×352 人）──────────
+  - name: 08_woman_llm
+    image: data/input_img/woman.png
+    prompt: "a woman walking on a street, soft natural lighting, shallow depth of field"
+    llm_instruction: "The woman walks from right to left, camera slowly zooms in on her face"
