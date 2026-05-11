@@ -111,37 +111,6 @@ def try_parse_json_str(s):
         return s
 
 
-def extract_tool_rounds(history):
-    """从 LLM chat history 中提取结构化 tool call 轮次。"""
-    rounds = []
-    current_round = None
-    for msg in history:
-        role = msg.get("role")
-        if role == "assistant" and msg.get("tool_calls"):
-            calls = []
-            for tc in msg["tool_calls"]:
-                fn = tc.get("function", {})
-                args_raw = fn.get("arguments", "")
-                try:
-                    parsed = json.loads(args_raw) if args_raw else {}
-                except json.JSONDecodeError:
-                    parsed = args_raw
-                calls.append({
-                    "id": tc.get("id"),
-                    "name": fn.get("name"),
-                    "arguments": parsed,
-                })
-            current_round = {"calls": calls, "results": []}
-            rounds.append(current_round)
-        elif role == "tool" and current_round is not None:
-            current_round["results"].append({
-                "id": msg.get("tool_call_id"),
-                "name": msg.get("name", ""),
-                "content": try_parse_json_str(msg.get("content", "")),
-            })
-    return rounds
-
-
 def load_checkpoint_weights(pipe, checkpoint_path, device="cpu"):
     print(f"  Loading checkpoint: {checkpoint_path}")
     t0 = time.time()
@@ -234,7 +203,11 @@ def pipe_state_dtype(pipe):
 # ────────── LLM call ──────────
 
 def call_llm(exp, defaults, llm_cfg, input_image):
-    from apps.gradio.llm_assistant import llm_apply_instruction
+    from apps.gradio.llm_assistant import (
+        llm_apply_instruction,
+        clear_llm_tool_log,
+        get_llm_tool_log,
+    )
 
     gen_kw = {
         "height": int(defaults.get("height", 480)),
@@ -248,6 +221,7 @@ def call_llm(exp, defaults, llm_cfg, input_image):
     }
 
     t0 = time.time()
+    clear_llm_tool_log()
     try:
         result = llm_apply_instruction(
             user_message=exp["llm_instruction"],
@@ -281,11 +255,19 @@ def call_llm(exp, defaults, llm_cfg, input_image):
         new_prompt = result[7] or ""
         status = result[25]
 
-        tool_rounds = extract_tool_rounds(history)
-        tool_summary = [
-            {"round": i, "calls": [c["name"] for c in r["calls"]]}
-            for i, r in enumerate(tool_rounds)
-        ]
+        tool_rounds = get_llm_tool_log()
+        tool_summary = []
+        for r in tool_rounds:
+            if r["type"] == "tool_calls":
+                tool_summary.append({
+                    "round": r["round"],
+                    "calls": [c["name"] for c in r["calls"]],
+                })
+            elif r["type"] == "fallback_ops":
+                tool_summary.append({
+                    "round": 0,
+                    "calls": [f"ops:{len(r['ops'])} updates:{list(r['updates'].keys())}"],
+                })
 
         return {
             "bbox_json": bbox_json,
@@ -308,7 +290,8 @@ def call_llm(exp, defaults, llm_cfg, input_image):
             "bbox_json": "", "camera_json": "", "point_json": "",
             "prompt": "", "status": err,
             "duration_sec": round(duration, 2),
-            "history": [], "tool_calls": [], "error": err,
+            "history": [], "tool_calls": [], "tool_rounds": [], "tool_summary": [],
+            "error": err,
         }
 
 

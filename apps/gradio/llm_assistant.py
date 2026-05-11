@@ -642,6 +642,61 @@ def _print_llm_debug(resp: Dict[str, Any]) -> None:
         return
 
 
+# ==================== Tool call log ====================
+
+_LLM_TOOL_LOG: List[Dict[str, Any]] = []
+
+
+def clear_llm_tool_log() -> None:
+    _LLM_TOOL_LOG.clear()
+
+
+def get_llm_tool_log() -> List[Dict[str, Any]]:
+    return list(_LLM_TOOL_LOG)
+
+
+def _log_tool_round(round_idx: int, tool_calls: List[dict], tool_results: List[dict]) -> None:
+    calls = []
+    for tc in tool_calls:
+        fn = tc.get("function", {})
+        args_raw = fn.get("arguments", "")
+        try:
+            parsed_args = json.loads(args_raw) if args_raw else {}
+        except Exception:
+            parsed_args = args_raw
+        calls.append({
+            "id": tc.get("id"),
+            "name": fn.get("name"),
+            "arguments": parsed_args,
+        })
+    results = []
+    for tr in tool_results:
+        content = tr.get("content", "")
+        try:
+            content = json.loads(content) if isinstance(content, str) else content
+        except Exception:
+            pass
+        results.append({
+            "id": tr.get("tool_call_id"),
+            "content": content,
+        })
+    _LLM_TOOL_LOG.append({
+        "round": round_idx,
+        "type": "tool_calls",
+        "calls": calls,
+        "results": results,
+    })
+
+
+def _log_fallback_ops(ops: list, updates: dict) -> None:
+    _LLM_TOOL_LOG.append({
+        "round": 0,
+        "type": "fallback_ops",
+        "ops": ops,
+        "updates": updates,
+    })
+
+
 # ==================== Prompts ====================
 
 LLM_SYSTEM_PROMPT = """你是 MotionCanvas 的“镜头/物体运动控制 + 生成参数编辑”助手。
@@ -2484,6 +2539,7 @@ def llm_apply_instruction(
             gen_params=gen_params,
         )
         tool_names_all.extend(tool_names)
+        _log_tool_round(round_idx, tool_calls, tool_results)
 
         if ask_payload is not None:
             q = str(ask_payload.get("question") or "").strip()
@@ -2862,6 +2918,13 @@ def llm_apply_instruction(
                 new_bbox_state = _bbox_state_from_json_text(new_bbox_json)
                 new_point_state = _point_state_from_json_text(new_point_json)
                 new_camera_state = _camera_state_from_json_text(new_camera_json)
+
+            # Log fallback ops/updates
+            if isinstance(obj, dict):
+                _log_fallback_ops(
+                    obj.get("ops", []),
+                    obj.get("updates", {}),
+                )
 
     except Exception as e:
         history.extend([
