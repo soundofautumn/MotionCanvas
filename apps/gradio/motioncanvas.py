@@ -1639,60 +1639,6 @@ with gr.Blocks(
                     "编码为模型参数（bbox_mask/track_video） → 视频生成。"
                 )
                 with gr.Tabs():
-                    # ---- 运动编辑（合并）Tab ----
-                    with gr.Tab("运动编辑"):
-                        gr.Markdown(
-                            "在同一个页面里编辑三种运动：**物体Bbox**、**局部点**、**相机**。\n"
-                            "用各自的帧滑条选择当前帧 → 编辑 → 保存为关键帧；系统会自动生成对应 JSON。"
-                        )
-
-                        sync_btn = gr.Button(
-                            "同步输入图像到画布", size="sm", variant="secondary",
-                        )
-
-                        with gr.Row():
-                            motion_frame_idx = gr.Slider(
-                                minimum=0,
-                                maximum=48,
-                                value=0,
-                                step=1,
-                                label="当前编辑帧 (全局)",
-                                interactive=True,
-                            )
-
-                        gr.Markdown("### 物体运动（Bbox）", elem_classes="section-title")
-                        # gr.Markdown("请通过 **LLM 助手** 或下方 **JSON / 高级选项** 手动编辑 bbox 数据。ImageEditor 因 Gradio [#12058](https://github.com/gradio-app/gradio/issues/12058) 已知 bug 暂时禁用。", elem_classes="kf-label")
-                        bbox_kf_state = gr.State({})
-                        bbox_preview = gr.Image(
-                            label="起始帧预览",
-                            type="pil",
-                            interactive=False,
-                            height=240,
-                        )
-
-                        gr.Markdown("### 局部运动（点轨迹）", elem_classes="section-title")
-                        # gr.Markdown("请通过 **LLM 助手** 或下方 **JSON / 高级选项** 手动编辑点轨迹数据。ImageEditor 因 Gradio [#12058](https://github.com/gradio-app/gradio/issues/12058) 已知 bug 暂时禁用。", elem_classes="kf-label")
-                        point_kf_state = gr.State({})
-                        point_preview = gr.Image(
-                            label="起始帧预览",
-                            type="pil",
-                            interactive=False,
-                            height=240,
-                        )
-
-                        gr.Markdown("### 相机运动", elem_classes="section-title")
-                        camera_kf_state = gr.State({})
-                        gr.Markdown("#### 当前帧相机参数", elem_classes="section-title")
-                        with gr.Row():
-                            camera_zoom = gr.Slider(0.5, 2.0, value=1.0, step=0.1, label="缩放 (Zoom)")
-                            camera_pan_x = gr.Slider(-100, 100, value=0, step=5, label="平移 X (Pan X)")
-                            camera_pan_y = gr.Slider(-100, 100, value=0, step=5, label="平移 Y (Pan Y)")
-                            camera_rotation = gr.Slider(-45, 45, value=0, step=5, label="旋转 (°)")
-
-                        with gr.Row():
-                            camera_save_btn = gr.Button("保存当前帧相机", variant="secondary")
-                            camera_delete_btn = gr.Button("删除当前帧相机", variant="secondary")
-                        
                     # ---- LLM 助手 Tab ----
                     with gr.Tab("LLM 助手"):
                         gr.Markdown("### LLM 助手（DeepSeek / OpenAI 兼容）", elem_classes="section-title")
@@ -1760,6 +1706,60 @@ with gr.Blocks(
                                 llm_send_btn = gr.Button("发送并应用", variant="primary")
                                 llm_clear_btn = gr.Button("清空对话", variant="secondary")
 
+                    # ---- 运动编辑（合并）Tab ----
+                    with gr.Tab("运动编辑"):
+                        gr.Markdown(
+                            "在同一个页面里编辑三种运动：**物体Bbox**、**局部点**、**相机**。\n"
+                            "用各自的帧滑条选择当前帧 → 编辑 → 保存为关键帧；系统会自动生成对应 JSON。"
+                        )
+
+                        sync_btn = gr.Button(
+                            "同步输入图像到画布", size="sm", variant="secondary",
+                        )
+
+                        with gr.Row():
+                            motion_frame_idx = gr.Slider(
+                                minimum=0,
+                                maximum=48,
+                                value=0,
+                                step=1,
+                                label="当前编辑帧 (全局)",
+                                interactive=True,
+                            )
+
+                        gr.Markdown("### 物体运动（Bbox）", elem_classes="section-title")
+                        # gr.Markdown("请通过 **LLM 助手** 或下方 **JSON / 高级选项** 手动编辑 bbox 数据。ImageEditor 因 Gradio [#12058](https://github.com/gradio-app/gradio/issues/12058) 已知 bug 暂时禁用。", elem_classes="kf-label")
+                        bbox_kf_state = gr.State({})
+                        bbox_preview = gr.Image(
+                            label="起始帧预览",
+                            type="pil",
+                            interactive=False,
+                            height=240,
+                        )
+
+                        gr.Markdown("### 局部运动（点轨迹）", elem_classes="section-title")
+                        # gr.Markdown("请通过 **LLM 助手** 或下方 **JSON / 高级选项** 手动编辑点轨迹数据。ImageEditor 因 Gradio [#12058](https://github.com/gradio-app/gradio/issues/12058) 已知 bug 暂时禁用。", elem_classes="kf-label")
+                        point_kf_state = gr.State({})
+                        point_preview = gr.Image(
+                            label="起始帧预览",
+                            type="pil",
+                            interactive=False,
+                            height=240,
+                        )
+
+                        gr.Markdown("### 相机运动", elem_classes="section-title")
+                        camera_kf_state = gr.State({})
+                        gr.Markdown("#### 当前帧相机参数", elem_classes="section-title")
+                        with gr.Row():
+                            camera_zoom = gr.Slider(0.5, 2.0, value=1.0, step=0.1, label="缩放 (Zoom)")
+                            camera_pan_x = gr.Slider(-100, 100, value=0, step=5, label="平移 X (Pan X)")
+                            camera_pan_y = gr.Slider(-100, 100, value=0, step=5, label="平移 Y (Pan Y)")
+                            camera_rotation = gr.Slider(-45, 45, value=0, step=5, label="旋转 (°)")
+
+                        with gr.Row():
+                            camera_save_btn = gr.Button("保存当前帧相机", variant="secondary")
+                            camera_delete_btn = gr.Button("删除当前帧相机", variant="secondary")
+                        
                     # ---- JSON / 高级 Tab ----
                     with gr.Tab("JSON / 高级选项"):
                         gr.Markdown("#### 物体运动")
