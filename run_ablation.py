@@ -47,12 +47,25 @@ DEFAULT_NEGATIVE_PROMPT = (
 
 # ────────── helpers ──────────
 
+def _resolve_env(obj):
+    if isinstance(obj, str):
+        import re
+        return re.sub(r"\$\{(\w+)\}", lambda m: os.environ.get(m.group(1), m.group(0)), obj)
+    if isinstance(obj, dict):
+        return {k: _resolve_env(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_resolve_env(v) for v in obj]
+    return obj
+
+
 def load_config(path):
     raw = Path(path).read_text()
     if path.endswith((".yaml", ".yml")):
         import yaml
-        return yaml.safe_load(raw)
-    return json.loads(raw)
+        cfg = yaml.safe_load(raw)
+    else:
+        cfg = json.loads(raw)
+    return _resolve_env(cfg)
 
 
 def now_iso():
