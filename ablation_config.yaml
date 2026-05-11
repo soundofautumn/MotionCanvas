@@ -14,7 +14,6 @@ defaults:
   sigma_shift: 5.0
   seed: 42
   fps: 15
-  negative_prompt: "Bright tones, overexposed, static, blurred details, subtitles, style, paintings, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, deformed, disfigured, still picture, messy background"
 
 llm:
   base_url: https://api.siliconflow.cn/v1
@@ -22,54 +21,56 @@ llm:
   model: Pro/moonshotai/Kimi-K2.5
   timeout: 120
   send_image: true
-  # GDINO + SAM 路径（可选，留空则 LLM 不使用视觉定位工具）
   gdino_model_dir: /root/autodl-tmp/models/GroundingDINO
   sam_ckpt: /root/autodl-tmp/models/sam_vit_h_4b8939.pth
   sam_type: vit_h
 
 experiments:
-  # ────────── 同一张 cat.png，逐个消融控制条件 ──────────
-  - name: 01_cat_baseline
+  # ════════════════════════════════════════════
+  # Direct 模式：手工预设参数（保持条件一致，只改一个变量）
+  # 用于跟 LLM 模式对比：同一张图 + 同一条指令，
+  # 手工 vs LLM 生成的运动参数，哪个效果更好。
+  # ════════════════════════════════════════════
+
+  - name: 01_cat_direct_bbox_only
     image: data/input_img/cat.png
     prompt: "a cat walking on a sunny beach, ocean waves, cinematic lighting"
     bbox_json: '{"objects": [{"frames": {"0": [0.1, 0.25, 0.4, 0.8], "24": [0.55, 0.25, 0.85, 0.8]}}]}'
-    camera_json: '{"camera": {"keyframes": [{"frame": 0, "zoom": 1.0, "pan": [0, 0], "rotation": 0}]}}'
 
-  - name: 02_cat_no_camera
+  - name: 02_cat_direct_bbox_camera
     image: data/input_img/cat.png
     prompt: "a cat walking on a sunny beach, ocean waves, cinematic lighting"
     bbox_json: '{"objects": [{"frames": {"0": [0.1, 0.25, 0.4, 0.8], "24": [0.55, 0.25, 0.85, 0.8]}}]}'
+    camera_json: '{"camera": {"keyframes": [{"frame": 0, "zoom": 1.0, "pan": [0, 0], "rotation": 0}, {"frame": 24, "zoom": 1.3, "pan": [0, 0], "rotation": 0}]}}'
 
-  - name: 03_cat_big_camera_zoom
+  - name: 03_cat_direct_diff_prompt
     image: data/input_img/cat.png
-    prompt: "a cat walking on a sunny beach, ocean waves, cinematic lighting"
-    bbox_json: '{"objects": [{"frames": {"0": [0.1, 0.25, 0.4, 0.8], "24": [0.55, 0.25, 0.85, 0.8]}}]}'
-    camera_json: '{"camera": {"keyframes": [{"frame": 0, "zoom": 1.0, "pan": [0, 0], "rotation": 0}, {"frame": 24, "zoom": 1.4, "pan": [0, 0], "rotation": 0}]}}'
-
-  - name: 04_cat_different_prompt
-    image: data/input_img/cat.png
-    prompt: "a cat walking in a dark alley, neon lights reflecting on wet ground, cyberpunk style"
+    prompt: "a cat walking in a dark alley, neon lights reflecting on wet ground, cyberpunk"
     bbox_json: '{"objects": [{"frames": {"0": [0.1, 0.25, 0.4, 0.8], "24": [0.55, 0.25, 0.85, 0.8]}}]}'
 
-  - name: 05_cat_seed_99
+  - name: 04_cat_direct_seed99
     image: data/input_img/cat.png
     prompt: "a cat walking on a sunny beach, ocean waves, cinematic lighting"
     bbox_json: '{"objects": [{"frames": {"0": [0.1, 0.25, 0.4, 0.8], "24": [0.55, 0.25, 0.85, 0.8]}}]}'
     camera_json: '{"camera": {"keyframes": [{"frame": 0, "zoom": 1.0, "pan": [0, 0], "rotation": 0}]}}'
     seed: 99
 
-  # ────────── 不同图片 + LLM 生成参数 ──────────
+  # ════════════════════════════════════════════
+  # LLM 模式：让 LLM 自己决定 prompt / bbox / camera
+  # ════════════════════════════════════════════
+
+  - name: 05_cat_llm
+    image: data/input_img/cat.png
+    llm_instruction: "a cat walking on a sunny beach, cinematic lighting, the cat walks from left to right"
+
   - name: 06_cat2_llm
     image: data/input_img/cat2.png
-    prompt: "a cat walking on a sunny beach, ocean waves, cinematic lighting"
-    llm_instruction: "The cat is on the left side looking right, then walks to the center of the frame"
+    llm_instruction: "a cat sitting on the left side, then walks to the center of the frame"
 
   - name: 07_bear_llm
     image: data/input_img/bear.jpg
-    prompt: "a bear walking in a forest, sunlight through trees, cinematic"
-    llm_instruction: "The bear walks from left to right, camera follows slightly"
+    llm_instruction: "a bear walking in a forest, sunlight through trees, the bear walks from left to right, camera zooms in slightly"
 
   - name: 08_woman_llm
     image: data/input_img/woman.png
-    prompt: "a woman walking on a street, soft natural lighting, shallow depth of field"
-    llm_instruction: "The woman walks from right to left, camera slowly zooms in on her face"
+    llm_instruction: "a woman walking on a street, soft natural lighting, shallow depth of field, the woman walks from right to left, camera slowly zooms in on her face"
