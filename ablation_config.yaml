@@ -62,11 +62,11 @@ experiments:
 
   - name: 05_cat_llm
     image: data/input_img/cat.png
-    llm_instruction: "a cat lying on a cushion by a window. The cat slowly lifts its head. Camera stays still."
+    llm_instruction: "a cat lying on a cushion by a window. The cat lifts its head and walking. Camera stays still."
 
   - name: 06_cat2_llm
     image: data/input_img/cat2.png
-    llm_instruction: "a cat sitting on a stone ledge in a garden. The cat looks left, then faces forward. Camera static."
+    llm_instruction: "a cat looks left, then walk from the center to the right. Camera static."
 
   - name: 07_bear_llm
     image: data/input_img/bear.jpg
