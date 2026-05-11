@@ -1,0 +1,58 @@
+{
+  "model": {
+    "dit_path": "/root/autodl-tmp/models/wan_1.3b/diffusion_pytorch_model.safetensors",
+    "vae_path": "/root/autodl-tmp/models/wan_1.3b/Wan2.1_VAE.pth",
+    "text_encoder_path": "/root/autodl-tmp/models/wan_1.3b/models_t5_umt5-xxl-enc-bf16.pth",
+    "image_encoder_path": "/root/autodl-tmp/models/wan_1.3b/Wan2.1_ImageEncoder.pth",
+    "checkpoint_path": "/root/autodl-tmp/models/motioncanvas_checkpoint.pt"
+  },
+  "defaults": {
+    "height": 480,
+    "width": 832,
+    "num_frames": 49,
+    "num_inference_steps": 50,
+    "cfg_scale": 5.0,
+    "sigma_shift": 5.0,
+    "seed": 42,
+    "fps": 15
+  },
+  "llm": {
+    "base_url": "https://api.siliconflow.cn/v1",
+    "api_key": "${API_KEY}",
+    "model": "Pro/moonshotai/Kimi-K2.5",
+    "timeout": 120
+  },
+  "experiments": [
+    {
+      "name": "01_cat_baseline",
+      "image": "data/images/cat.png",
+      "prompt": "a cat walking on a sunny beach, cinematic lighting",
+      "bbox_json": "{\"objects\": [{\"frames\": {\"0\": [0.2, 0.3, 0.5, 0.8], \"24\": [0.5, 0.3, 0.8, 0.8]}}]}",
+      "camera_json": "{\"camera\": {\"keyframes\": [{\"frame\": 0, \"zoom\": 1.0, \"pan\": [0, 0], \"rotation\": 0}]}}"
+    },
+    {
+      "name": "02_cat_no_camera",
+      "image": "data/images/cat.png",
+      "prompt": "a cat walking on a sunny beach, cinematic lighting",
+      "bbox_json": "{\"objects\": [{\"frames\": {\"0\": [0.2, 0.3, 0.5, 0.8], \"24\": [0.5, 0.3, 0.8, 0.8]}}]}"
+    },
+    {
+      "name": "03_cat_different_prompt",
+      "image": "data/images/cat.png",
+      "prompt": "a cat walking in a dark alley, neon lights, cyberpunk",
+      "bbox_json": "{\"objects\": [{\"frames\": {\"0\": [0.2, 0.3, 0.5, 0.8], \"24\": [0.5, 0.3, 0.8, 0.8]}}]}"
+    },
+    {
+      "name": "04_cat_llm_generated",
+      "image": "data/images/cat.png",
+      "prompt": "a cat jumping onto a table",
+      "llm_instruction": "The cat is sitting on the left side of the frame, then jumps to the center of the table"
+    },
+    {
+      "name": "05_dog_llm",
+      "image": "data/images/dog.png",
+      "prompt": "a dog running",
+      "llm_instruction": "The dog runs from right to left across the frame, camera follows slightly"
+    }
+  ]
+}
