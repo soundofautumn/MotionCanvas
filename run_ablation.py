@@ -2,55 +2,19 @@
 """
 MotionCanvas 批量消融实验脚本。
 
+基于 apps/gradio/llm_assistant.py 的真实 LLM 调参逻辑。
 支持两种模式：
   1) Direct 模式：从配置文件直接读取 bbox/camera/point JSON，无需 LLM。
-  2) LLM 模式：为每个实验调用 LLM API 自动生成运动参数。
+  2) LLM 模式：调用 llm_apply_instruction（完整 tool-calling + GDINO/SAM 定位）。
 
 用法：
-  python run_ablation.py --config experiments.json --output_dir ./ablations
-  python run_ablation.py --config experiments.yaml --output_dir ./ablations --skip_llm
+  python run_ablation.py --config ablation_config.yaml --output_dir ./ablations
+  python run_ablation.py --config ablation_config.yaml --output_dir ./ablations --skip_llm
 
-配置文件格式（JSON 或 YAML）：
-  {
-    "model": {
-      "dit_path": "...",
-      "vae_path": "...",
-      "text_encoder_path": "...",
-      "image_encoder_path": "...",
-      "checkpoint_path": "..."
-    },
-    "defaults": {
-      "height": 480, "width": 832, "num_frames": 49,
-      "num_inference_steps": 50, "cfg_scale": 5.0,
-      "sigma_shift": 5.0, "seed": 42, "fps": 15,
-      "negative_prompt": "..."
-    },
-    "llm": {  // 可选，LLM 模式配置
-      "base_url": "https://api.siliconflow.cn/v1",
-      "api_key": "sk-xxx",
-      "model": "Pro/moonshotai/Kimi-K2.5"
-    },
-    "experiments": [
-      {
-        "name": "baseline",
-        "image": "images/cat.png",
-        "prompt": "a cat walking",
-        // LLM 模式：填写 llm_instruction 让 LLM 生成参数
-        "llm_instruction": "the cat walks from left to right",
-        // Direct 模式：直接填写 bbox/camera/point JSON（优先级高于 LLM）
-        "bbox_json": '{"objects": [{"frames": {"0": [0.2,0.3,0.5,0.7], "24": [0.6,0.3,0.9,0.7]}}]}',
-        "camera_json": '{"camera": {"keyframes": [{"frame": 0, "zoom": 1.0, "pan": [0,0], "rotation": 0}]}}',
-        "point_json": "",
-        // 可选单实验覆盖
-        "seed": 123,
-        "cfg_scale": 7.0
-      }
-    ]
-  }
+配置文件格式见 examples/ablation_example.yaml。
 """
 
 import argparse
-import copy
 import json
 import os
 import sys
@@ -64,8 +28,6 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from diffsynth import ModelManager, save_video
 from diffsynth.pipelines.wan_video_motioncanvas import WanVideoPipeline_motioncanvas
-
-# 从 motioncanvas.py 复用关键函数
 from apps.gradio.motioncanvas import (
     build_bbox_mask_from_json_str,
     _build_fallback_track_video,
@@ -80,42 +42,6 @@ DEFAULT_NEGATIVE_PROMPT = (
     "walking backwards"
 )
 
-LLM_MOTION_PROMPT = """You are a motion parameter generator for MotionCanvas, a video generation system.
-
-Given an input image description and a user instruction about desired motion, generate the appropriate bounding box (bbox) keyframes and camera keyframes in JSON format.
-
-**Output format**: Return ONLY a valid JSON object with NO markdown, NO code fences, NO extra text:
-{
-  "bbox_json": "{\\"objects\\": [{\\"frames\\": {\\"0\\": [x1,y1,x2,y2], \\"24\\": [x1,y1,x2,y2]}}]}",
-  "camera_json": "{\\"camera\\": {\\"keyframes\\": [{\\"frame\\": 0, \\"zoom\\": 1.0, \\"pan\\": [0,0], \\"rotation\\": 0}]}}",
-  "point_json": ""
-}
-
-**Rules**:
-- bbox coordinates are normalized [0,1] relative to image dimensions: [x1, y1, x2, y2]
-- The video is {num_frames} frames long (0-indexed).
-- For camera: zoom=1.0 means no zoom, pan is in pixels (positive=right/down), rotation is in degrees.
-- If there is no camera motion, set camera_json with default values (zoom=1.0, pan=[0,0], rotation=0).
-- Always output at least one bbox covering the main subject.
-- If the subject moves, create keyframes at the start and end frames to define the trajectory.
-
-**Example for "a cat walks from left to right"**:
-{{
-  "bbox_json": "{{\\"objects\\": [{{\\"frames\\": {{\\"0\\": [0.1, 0.3, 0.4, 0.8], \\"24\\": [0.6, 0.3, 0.9, 0.8]}}}}]}}",
-  "camera_json": "{{\\"camera\\": {{\\"keyframes\\": [{{\\"frame\\": 0, \\"zoom\\": 1.0, \\"pan\\": [0, 0], \\"rotation\\": 0}}]}}}}",
-  "point_json": ""
-}}
-
-**Example for "zoom in on the face"**:
-{{
-  "bbox_json": "{{\\"objects\\": [{{\\"frames\\": {{\\"0\\": [0.2, 0.1, 0.8, 0.6], \\"24\\": [0.3, 0.2, 0.7, 0.5]}}}}]}}",
-  "camera_json": "{{\\"camera\\": {{\\"keyframes\\": [{{\\"frame\\": 0, \\"zoom\\": 1.0, \\"pan\\": [0, 0], \\"rotation\\": 0}}, {{\\"frame\\": 24, \\"zoom\\": 1.5, \\"pan\\": [0, 0], \\"rotation\\": 0}}]}}}}",
-  "point_json": ""
-}}
-
-Now generate parameters for this request: {instruction}
-"""
-
 
 def load_config(path):
     raw = Path(path).read_text()
@@ -125,7 +51,7 @@ def load_config(path):
     return json.loads(raw)
 
 
-def _load_checkpoint_weights(pipe, checkpoint_path, device="cpu"):
+def load_checkpoint_weights(pipe, checkpoint_path, device="cpu"):
     print(f"  Loading checkpoint: {checkpoint_path}")
     ckpt = torch.load(checkpoint_path, map_location=device)
     state_dict = ckpt.get("state_dict", ckpt.get("module", ckpt))
@@ -175,78 +101,78 @@ def build_pipeline(cfg):
 
     ckpt = model_cfg.get("checkpoint_path")
     if ckpt and os.path.exists(ckpt):
-        pipe = _load_checkpoint_weights(pipe, ckpt, device="cpu")
+        pipe = load_checkpoint_weights(pipe, ckpt, device="cpu")
         pipe.bbox_zeroconv = pipe.bbox_zeroconv.to(dtype=torch_dtype, device=device)
 
     pipe.enable_vram_management(num_persistent_param_in_dit=None)
     return pipe
 
 
-def call_llm_for_motion(instruction, num_frames, llm_cfg):
-    import requests
-
-    system_prompt = LLM_MOTION_PROMPT.format(
-        num_frames=num_frames, instruction=instruction
-    )
-
-    resp = requests.post(
-        f"{llm_cfg['base_url'].rstrip('/')}/chat/completions",
-        json={
-            "model": llm_cfg["model"],
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": instruction},
-            ],
-            "temperature": 0.1,
-            "max_tokens": 2048,
-        },
-        headers={
-            "Authorization": f"Bearer {llm_cfg['api_key']}",
-            "Content-Type": "application/json",
-        },
-        timeout=llm_cfg.get("timeout", 120),
-    )
-    resp.raise_for_status()
-    content = resp.json()["choices"][0]["message"]["content"]
-
-    for wrap in ["```json", "```JSON", "```"]:
-        if wrap in content:
-            content = content.split(wrap, 1)[1]
-            content = content.rsplit("```", 1)[0]
-            break
-    content = content.strip()
-    return json.loads(content)
+def pipe_state_dtype(pipe):
+    return next(pipe.parameters()).dtype
 
 
-def resolve_experiment_params(exp, defaults, llm_cfg, skip_llm):
-    params = copy.deepcopy(defaults)
-    params.update({k: exp[k] for k in ("prompt",) if k in exp})
-    for key in ["height", "width", "num_frames", "num_inference_steps",
-                 "cfg_scale", "sigma_shift", "seed", "fps", "negative_prompt"]:
-        if key in exp:
-            params[key] = exp[key]
+def call_llm_apply_instruction(exp, defaults, llm_cfg, input_image):
+    """
+    调用 llm_assistant.py 的 llm_apply_instruction 获取运动参数。
 
-    has_direct = any(exp.get(k) for k in ["bbox_json", "camera_json", "point_json"])
-    has_llm = bool(exp.get("llm_instruction")) and llm_cfg and not skip_llm
+    返回 (bbox_json, camera_json, point_json, prompt, status_msg)。
+    出错时 bbox_json="" 并返回错误信息。
+    """
+    from apps.gradio.llm_assistant import llm_apply_instruction
 
-    if has_direct:
-        params["bbox_json"] = exp.get("bbox_json", "")
-        params["camera_json"] = exp.get("camera_json", "")
-        params["point_json"] = exp.get("point_json", "")
-    elif has_llm:
-        print(f"  Calling LLM for motion params...")
-        result = call_llm_for_motion(
-            exp["llm_instruction"], params["num_frames"], llm_cfg
+    gen_defaults = {
+        "height": int(defaults.get("height", 480)),
+        "width": int(defaults.get("width", 832)),
+        "num_frames": int(defaults.get("num_frames", 49)),
+        "fps": int(defaults.get("fps", 15)),
+        "num_inference_steps": int(defaults.get("num_inference_steps", 50)),
+        "cfg_scale": float(defaults.get("cfg_scale", 5.0)),
+        "sigma_shift": float(defaults.get("sigma_shift", 5.0)),
+        "seed": int(defaults.get("seed", 42)),
+    }
+
+    try:
+        result = llm_apply_instruction(
+            user_message=exp["llm_instruction"],
+            chat_history=[],
+            llm_base_url=llm_cfg["base_url"],
+            llm_api_key=llm_cfg["api_key"],
+            llm_model=llm_cfg["model"],
+            llm_timeout=llm_cfg.get("timeout", 120),
+            gdino_model_dir=llm_cfg.get("gdino_model_dir", ""),
+            sam_ckpt=llm_cfg.get("sam_ckpt", ""),
+            sam_type=llm_cfg.get("sam_type", "vit_h"),
+            input_image=input_image,
+            llm_send_image=llm_cfg.get("send_image", input_image is not None),
+            bbox_json_text="",
+            camera_json_text="",
+            point_json_text="",
+            prompt=exp.get("prompt", defaults.get("prompt", "")),
+            negative_prompt=defaults.get("negative_prompt", DEFAULT_NEGATIVE_PROMPT),
+            **gen_defaults,
+            motion_frame_idx=0,
+            bbox_kf_state={},
+            point_kf_state={},
+            camera_kf_state={},
         )
-        params["bbox_json"] = result.get("bbox_json", "")
-        params["camera_json"] = result.get("camera_json", "")
-        params["point_json"] = result.get("point_json", "")
-    else:
-        params["bbox_json"] = ""
-        params["camera_json"] = ""
-        params["point_json"] = ""
 
-    return params
+        bbox_json = result[1]
+        point_json = result[2]
+        camera_json = result[3]
+        new_prompt = result[7]
+        status = result[25]
+
+        if not bbox_json and not point_json:
+            status = f"LLM 未生成运动参数: {status}"
+            print(f"  WARNING: {status}")
+
+        return bbox_json, camera_json, point_json, new_prompt, status
+
+    except Exception as e:
+        err_msg = f"LLM 调用失败: {e}"
+        print(f"  ERROR: {err_msg}")
+        return "", "", "", exp.get("prompt", ""), err_msg
 
 
 def run_experiment(pipe, exp, defaults, llm_cfg, output_dir, skip_llm):
@@ -258,13 +184,6 @@ def run_experiment(pipe, exp, defaults, llm_cfg, output_dir, skip_llm):
     print(f"Experiment: {name}")
     print(f"{'='*60}")
 
-    params = resolve_experiment_params(exp, defaults, llm_cfg, skip_llm)
-
-    with open(exp_dir / "config.json", "w") as f:
-        json.dump({"experiment": exp, "resolved_params": {
-            k: v for k, v in params.items() if k != "negative_prompt"
-        }}, f, indent=2, ensure_ascii=False)
-
     image_path = exp["image"]
     if not os.path.exists(image_path):
         print(f"  WARNING: image not found: {image_path}, skipping")
@@ -272,6 +191,56 @@ def run_experiment(pipe, exp, defaults, llm_cfg, output_dir, skip_llm):
     input_image = Image.open(image_path).convert("RGB")
     input_image.save(str(exp_dir / "input.png"))
 
+    # ── Resolve parameters ──
+    params = dict(defaults)
+    params["prompt"] = exp.get("prompt", defaults.get("prompt", ""))
+    for key in ["height", "width", "num_frames", "num_inference_steps",
+                 "cfg_scale", "sigma_shift", "seed", "fps", "negative_prompt"]:
+        if key in exp:
+            params[key] = exp[key]
+
+    has_direct = any(exp.get(k) for k in ["bbox_json", "camera_json", "point_json"])
+    has_llm = bool(exp.get("llm_instruction")) and llm_cfg and not skip_llm
+
+    llm_status = ""
+    if has_direct:
+        params["bbox_json"] = exp.get("bbox_json", "")
+        params["camera_json"] = exp.get("camera_json", "")
+        params["point_json"] = exp.get("point_json", "")
+        print("  Mode: direct (predefined JSON)")
+    elif has_llm:
+        print(f"  Mode: LLM (instruction: {exp['llm_instruction'][:60]})")
+        bbox_j, camera_j, point_j, new_prompt, llm_status = call_llm_apply_instruction(
+            exp, defaults, llm_cfg, input_image
+        )
+        params["bbox_json"] = bbox_j
+        params["camera_json"] = camera_j
+        params["point_json"] = point_j
+        if new_prompt:
+            params["prompt"] = new_prompt
+        print(f"  LLM status: {llm_status}")
+    else:
+        params["bbox_json"] = ""
+        params["camera_json"] = ""
+        params["point_json"] = ""
+        print("  Mode: no motion control")
+
+    # Save resolved config
+    with open(exp_dir / "config.json", "w") as f:
+        f.write(json.dumps({
+            "experiment": {k: v for k, v in exp.items() if k != "llm_instruction"},
+            "resolved_prompt": params["prompt"],
+            "has_bbox": bool(params.get("bbox_json")),
+            "has_camera": bool(params.get("camera_json")),
+            "has_point": bool(params.get("point_json")),
+            "llm_status": llm_status,
+            "gen_params": {k: params[k] for k in [
+                "height", "width", "num_frames", "num_inference_steps",
+                "cfg_scale", "sigma_shift", "seed", "fps"
+            ] if k in params},
+        }, indent=2, ensure_ascii=False))
+
+    # ── Build control signals ──
     pipe_kwargs = {
         "prompt": [params["prompt"]],
         "negative_prompt": params.get("negative_prompt", DEFAULT_NEGATIVE_PROMPT),
@@ -291,22 +260,19 @@ def run_experiment(pipe, exp, defaults, llm_cfg, output_dir, skip_llm):
 
     bbox_mask = None
     if params.get("bbox_json"):
-        print(f"  Building bbox_mask...")
+        print("  Building bbox_mask...")
         bbox_mask = build_bbox_mask_from_json_str(
             params["bbox_json"],
             int(params["num_frames"]),
             int(params["height"]),
             int(params["width"]),
         )
-        bbox_mask = bbox_mask.to(
-            dtype=pipe_state_dtype(pipe), device=pipe.device
-        )
+        bbox_mask = bbox_mask.to(dtype=pipe_state_dtype(pipe), device=pipe.device)
         torch.save(bbox_mask.cpu(), str(exp_dir / "bbox_mask.pt"))
 
     track_video = None
-    has_any_motion = any(params.get(k) for k in ["bbox_json", "camera_json", "point_json"])
-    if has_any_motion:
-        print(f"  Building track_video...")
+    if any(params.get(k) for k in ["bbox_json", "camera_json", "point_json"]):
+        print("  Building track_video...")
         track_video = _build_fallback_track_video(
             params.get("bbox_json", ""),
             params.get("camera_json", ""),
@@ -323,7 +289,8 @@ def run_experiment(pipe, exp, defaults, llm_cfg, output_dir, skip_llm):
     pipe_kwargs["bbox_mask"] = bbox_mask
     pipe_kwargs["track_video"] = track_video
 
-    print(f"  Generating video ({params['width']}x{params['height']}, "
+    # ── Generate ──
+    print(f"  Generating ({params['width']}x{params['height']}, "
           f"{params['num_frames']} frames, seed={params['seed']})...")
     t0 = time.time()
     video_frames = pipe(**pipe_kwargs)
@@ -331,27 +298,21 @@ def run_experiment(pipe, exp, defaults, llm_cfg, output_dir, skip_llm):
     print(f"  Done in {elapsed:.1f}s")
 
     if video_frames and len(video_frames) > 0:
-        output_path = str(exp_dir / "output.mp4")
-        save_video(video_frames[0], output_path, fps=int(params["fps"]), quality=5)
-        print(f"  Saved: {output_path}")
+        save_video(video_frames[0], str(exp_dir / "output.mp4"),
+                   fps=int(params["fps"]), quality=5)
+        print(f"  Saved: {exp_dir / 'output.mp4'}")
     else:
         print(f"  FAILED: no frames generated")
 
     return exp_dir
 
 
-def pipe_state_dtype(pipe):
-    return next(pipe.parameters()).dtype
-
-
 def main():
-    parser = argparse.ArgumentParser(
-        description="MotionCanvas 批量消融实验"
-    )
+    parser = argparse.ArgumentParser(description="MotionCanvas 批量消融实验")
     parser.add_argument("--config", required=True, help="实验配置文件 (.json / .yaml)")
     parser.add_argument("--output_dir", default="./ablations", help="输出目录")
     parser.add_argument("--skip_llm", action="store_true", help="跳过 LLM 调用，仅使用直接参数")
-    parser.add_argument("--resume", help="从指定实验名开始（跳过前面的）")
+    parser.add_argument("--resume", help="从指定实验名开始")
     args = parser.parse_args()
 
     cfg = load_config(args.config)
@@ -363,7 +324,6 @@ def main():
 
     experiments = cfg["experiments"]
     resumed = args.resume is None
-
     for exp in experiments:
         if not resumed:
             if exp["name"] == args.resume:
@@ -371,7 +331,6 @@ def main():
             else:
                 print(f"Skipping {exp['name']} (resume from {args.resume})")
                 continue
-
         run_experiment(pipe, exp, defaults, llm_cfg, args.output_dir, args.skip_llm)
 
     print(f"\nAll experiments done. Results in: {args.output_dir}")
