@@ -102,6 +102,46 @@ def safe_json_size(obj, max_len=2000):
     return s[:max_len] + "..." if len(s) > max_len else s
 
 
+def try_parse_json_str(s):
+    if not s or not isinstance(s, str):
+        return s
+    try:
+        return json.loads(s)
+    except (json.JSONDecodeError, ValueError):
+        return s
+
+
+def extract_tool_rounds(history):
+    """从 LLM chat history 中提取结构化 tool call 轮次。"""
+    rounds = []
+    current_round = None
+    for msg in history:
+        role = msg.get("role")
+        if role == "assistant" and msg.get("tool_calls"):
+            calls = []
+            for tc in msg["tool_calls"]:
+                fn = tc.get("function", {})
+                args_raw = fn.get("arguments", "")
+                try:
+                    parsed = json.loads(args_raw) if args_raw else {}
+                except json.JSONDecodeError:
+                    parsed = args_raw
+                calls.append({
+                    "id": tc.get("id"),
+                    "name": fn.get("name"),
+                    "arguments": parsed,
+                })
+            current_round = {"calls": calls, "results": []}
+            rounds.append(current_round)
+        elif role == "tool" and current_round is not None:
+            current_round["results"].append({
+                "id": msg.get("tool_call_id"),
+                "name": msg.get("name", ""),
+                "content": try_parse_json_str(msg.get("content", "")),
+            })
+    return rounds
+
+
 def load_checkpoint_weights(pipe, checkpoint_path, device="cpu"):
     print(f"  Loading checkpoint: {checkpoint_path}")
     t0 = time.time()
@@ -241,15 +281,11 @@ def call_llm(exp, defaults, llm_cfg, input_image):
         new_prompt = result[7] or ""
         status = result[25]
 
-        tool_calls_log = []
-        for msg in history:
-            if isinstance(msg, dict) and msg.get("tool_calls"):
-                for tc in msg["tool_calls"]:
-                    fn = tc.get("function", {})
-                    tool_calls_log.append({
-                        "name": fn.get("name"),
-                        "arguments": safe_json_size(fn.get("arguments", "")),
-                    })
+        tool_rounds = extract_tool_rounds(history)
+        tool_summary = [
+            {"round": i, "calls": [c["name"] for c in r["calls"]]}
+            for i, r in enumerate(tool_rounds)
+        ]
 
         return {
             "bbox_json": bbox_json,
@@ -259,7 +295,8 @@ def call_llm(exp, defaults, llm_cfg, input_image):
             "status": status,
             "duration_sec": round(duration, 2),
             "history": history,
-            "tool_calls": tool_calls_log,
+            "tool_rounds": tool_rounds,
+            "tool_summary": tool_summary,
             "error": None,
         }
 
@@ -334,20 +371,23 @@ def run_experiment(pipe, exp, defaults, llm_cfg, output_dir, skip_llm):
         params["point_json"] = r["point_json"]
         if r["prompt"]:
             params["prompt"] = r["prompt"]
+        tc_count = sum(len(r["calls"]) for r in r["tool_rounds"])
         llm_log = {
             "instruction": exp["llm_instruction"],
             "model": llm_cfg["model"],
             "duration_sec": r["duration_sec"],
             "status": r["status"],
-            "tool_calls": r["tool_calls"],
+            "tool_rounds": r["tool_summary"],
             "error": r["error"],
         }
-        print(f"  LLM: {r['status']}  ({r['duration_sec']:.1f}s, {len(r['tool_calls'])} tool calls)")
+        print(f"  LLM: {r['status']}  ({r['duration_sec']:.1f}s, {tc_count} tool calls in {len(r['tool_rounds'])} rounds)")
         if r["prompt"]:
             print(f"  Prompt from LLM: {r['prompt'][:100]}")
         log["llm"] = llm_log
         if r["history"]:
             (exp_dir / "llm_history.json").write_text(json.dumps(r["history"], indent=2, ensure_ascii=False))
+        if r["tool_rounds"]:
+            (exp_dir / "llm_tool_calls.json").write_text(json.dumps(r["tool_rounds"], indent=2, ensure_ascii=False))
     else:
         params["bbox_json"] = ""
         params["camera_json"] = ""
@@ -362,7 +402,7 @@ def run_experiment(pipe, exp, defaults, llm_cfg, output_dir, skip_llm):
         if not params.get("camera_json"):
             params["camera_json"] = '{"camera": {"keyframes": [{"frame": 0, "zoom": 1.0, "pan": [0, 0], "rotation": 0}]}}'
 
-    # ── save config ──
+    # ── save config (JSON 字符串转为实际对象) ──
     log["prompt"] = params["prompt"]
     log["seed"] = int(params.get("seed", 42))
     (exp_dir / "config.json").write_text(json.dumps({
@@ -370,9 +410,9 @@ def run_experiment(pipe, exp, defaults, llm_cfg, output_dir, skip_llm):
         "has_bbox": bool(params.get("bbox_json")),
         "has_camera": bool(params.get("camera_json")),
         "has_point": bool(params.get("point_json")),
-        "bbox_json": params["bbox_json"],
-        "camera_json": params["camera_json"],
-        "point_json": params["point_json"],
+        "bbox_json": try_parse_json_str(params.get("bbox_json", "")),
+        "camera_json": try_parse_json_str(params.get("camera_json", "")),
+        "point_json": try_parse_json_str(params.get("point_json", "")),
         "gen_params": {k: params[k] for k in
             ["height", "width", "num_frames", "num_inference_steps",
              "cfg_scale", "sigma_shift", "seed", "fps"] if k in params},
