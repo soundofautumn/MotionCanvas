@@ -749,7 +749,8 @@ LLM_SYSTEM_PROMPT = """你是 MotionCanvas 的“镜头/物体运动控制 + 生
 
 你可以连续多轮调用 tools：
 - 如果一次 tool_calls 不足以完成用户需求，可以先调用一批 tools，等待状态更新后继续调用下一批 tools，直到完成。
-- 注意避免无限循环：通常 1-3 轮就应完成。
+- 注意避免无限循环：通常 3-6 轮就应完成。
+- 规划好工具调用顺序：先定位物体，再创建运动轨迹，最后处理相机和生成参数。
 
 关于起始帧图像的发送规则：
 - 起始帧图像默认不会在每次消息都发送。
@@ -796,6 +797,17 @@ updates 语义（可选，用于直接覆盖字段）：
     "Aerial view of a city skyline at night, neon lights, cyberpunk style"
 - 不要写无意义的通用词如"masterpiece, best quality"——Wan 模型不需要这些。
 - 如果用户没有提供足够的视觉描述，可以根据 bbox 运动/相机运动/输入图像内容合理推断并补全 prompt。
+
+关于物体运动（非常重要）：
+- 用户的核心需求通常是让**物体动起来**（移动、平移、转动等），不能用静止的 bbox/point 关键帧。
+- **标准工作流**（请按此顺序执行）：
+    1. 定位物体：调用 gdino_detect_bbox / gdino_sam_detect_point 获取第 0 帧的位置。
+    2. 创建运动轨迹：调用 bbox_translate / points_translate 让物体在帧之间移动（例如从 frame 0 到 frame 48 水平移动 dx=0.3）。
+    3. 处理相机运动（如果有必要）。
+    4. 设置生成参数（prompt 等）。
+- **不要** 在只设了第 0 帧的 bbox/point 后就结束——没有运动轨迹，视频就是静止的。
+- **不要** 调用无意义的 camera_set（例如 zoom=1.0, pan=[0,0], rotation=0），这浪费轮次且没有效果。
+- 如果用户没说具体的运动方向/幅度，根据 prompt 内容（如 "walking"、"jumping"、"flying"）合理推断一个运动轨迹。
 
 关键约束（非常重要）：
 - 你 **必须** 始终输出 bbox 和点轨迹（point_json/points），不能省略。
@@ -2430,7 +2442,7 @@ def llm_apply_instruction(
 
     # Allow multi-round tool calling: call -> apply tools -> feed updated state -> call again.
     # Keep it small to avoid accidental loops.
-    max_tool_rounds = 4
+    max_tool_rounds = 6
     tool_names_all: List[str] = []
 
     # If we sent the image due to checkbox, auto-uncheck after this request.
