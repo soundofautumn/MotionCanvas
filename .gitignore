@@ -51,7 +51,7 @@ checkpoints/
 # Output files
 outputs/
 results/
-*.mp4
+# *.mp4
 *.avi
 *.gif
 
@@ -62,6 +62,4 @@ logs/
 # OS
 .DS_Store
 Thumbs.db
-
-!ablations/*.mp4
 
