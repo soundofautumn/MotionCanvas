@@ -226,7 +226,7 @@ def build_bbox_mask_from_json_str(json_str, num_frames, height, width):
                 x1 = int(max(0, min(width, round(x10 + (x11 - x10) * t))))
                 x2 = int(max(0, min(width, round(x20 + (x21 - x20) * t))))
                 y1 = int(max(0, min(height, round(y10 + (y11 - y10) * t))))
-                y2 = int(max(0, min(height, round(y21 + (y20 - y20) * t))))
+                y2 = int(max(0, min(height, round(y20 + (y21 - y20) * t))))
                 if x2 > x1 and y2 > y1:
                     mask[:, :, f, y1:y2, x1:x2] = 1.0
 

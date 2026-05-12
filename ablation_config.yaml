@@ -62,7 +62,7 @@ experiments:
 
   - name: 05_cat_llm
     image: data/input_img/cat.png
-    llm_instruction: "a cat lying on a cushion by a window. The cat lifts its head and walking. Camera stays still."
+    llm_instruction: "a cat is walking. Camera stays still."
 
   - name: 06_cat2_llm
     image: data/input_img/cat2.png
@@ -70,8 +70,8 @@ experiments:
 
   - name: 07_bear_llm
     image: data/input_img/bear.jpg
-    llm_instruction: "a bear in a forest near a lake. The bear walks from left to right. Camera gently zooms in."
+    llm_instruction: "a bear walks from left to right. Camera gently zooms in."
 
   - name: 08_woman_llm
     image: data/input_img/woman.png
-    llm_instruction: "a woman holding a camera near a large cruise ship on a sunny day. She smiles and turns her head slightly left. Camera slow push-in."
+    llm_instruction: "a woman turns her head left. Camera slowly zooms in on her face"
