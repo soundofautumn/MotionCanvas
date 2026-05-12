@@ -1,0 +1,7 @@
+{
+  "experiment": "06_cat2_llm",
+  "prompt": "A tabby cat sitting on a stone in a garden, looking to the left, then standing up and walking to the right, natural movement, detailed fur, outdoor scene with green plants and trees, cinematic lighting, high quality",
+  "seed": 42,
+  "mode": "llm",
+  "image": "data/input_img/cat2.png"
+}

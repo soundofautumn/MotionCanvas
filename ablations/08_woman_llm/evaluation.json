@@ -1,0 +1,7 @@
+{
+  "experiment": "08_woman_llm",
+  "prompt": "A woman with sunglasses and a camera turns her head to the right, looking away from camera, natural head movement, outdoor cruise ship background, sunny day, cinematic lighting, high quality video",
+  "seed": 42,
+  "mode": "llm",
+  "image": "data/input_img/woman.png"
+}

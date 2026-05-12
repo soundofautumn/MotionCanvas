@@ -1,0 +1,7 @@
+{
+  "experiment": "07_bear_llm",
+  "prompt": "A brown bear walking from left to right across a forest meadow near a lake, natural lighting, cinematic, high quality",
+  "seed": 42,
+  "mode": "llm",
+  "image": "data/input_img/bear.jpg"
+}

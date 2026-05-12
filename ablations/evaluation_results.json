@@ -1,0 +1,37 @@
+{
+  "generated_at": "2026-05-12T12:55:45+00:00",
+  "device": "cuda:0",
+  "models": "all",
+  "sample_n": 8,
+  "has_reference": false,
+  "results": [
+    {
+      "experiment": "05_cat_llm",
+      "prompt": "A cat walking on a soft pink cushion, realistic fur texture, gray and white tabby cat, indoor natural lighting, smooth movement, high quality",
+      "seed": 42,
+      "mode": "llm",
+      "image": "data/input_img/cat.png"
+    },
+    {
+      "experiment": "06_cat2_llm",
+      "prompt": "A tabby cat sitting on a stone in a garden, looking to the left, then standing up and walking to the right, natural movement, detailed fur, outdoor scene with green plants and trees, cinematic lighting, high quality",
+      "seed": 42,
+      "mode": "llm",
+      "image": "data/input_img/cat2.png"
+    },
+    {
+      "experiment": "07_bear_llm",
+      "prompt": "A brown bear walking from left to right across a forest meadow near a lake, natural lighting, cinematic, high quality",
+      "seed": 42,
+      "mode": "llm",
+      "image": "data/input_img/bear.jpg"
+    },
+    {
+      "experiment": "08_woman_llm",
+      "prompt": "A woman with sunglasses and a camera turns her head to the right, looking away from camera, natural head movement, outdoor cruise ship background, sunny day, cinematic lighting, high quality video",
+      "seed": 42,
+      "mode": "llm",
+      "image": "data/input_img/woman.png"
+    }
+  ]
+}
