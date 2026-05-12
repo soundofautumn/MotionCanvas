@@ -74,4 +74,4 @@ experiments:
 
   - name: 08_woman_llm
     image: data/input_img/woman.png
-    llm_instruction: "a woman turns her head left. Camera slowly zooms in on her face"
+    llm_instruction: "a woman turns her head right. Camera slowly zooms in on her face"
