@@ -1,11 +1,72 @@
 {
-  "prompt": "a woman walking on a street, soft natural lighting, shallow depth of field, cinematic shot, high quality",
+  "prompt": "A woman with sunglasses and a camera turns her head to the right, looking away from camera, natural head movement, outdoor cruise ship background, sunny day, cinematic lighting, high quality video",
   "has_bbox": true,
   "has_camera": true,
   "has_point": true,
-  "bbox_json": "{\n  \"objects\": [\n    {\n      \"frames\": {\n        \"0\": [\n          0.3475,\n          0.2481,\n          0.646,\n          0.9945\n        ],\n        \"48\": [\n          0.0,\n          0.2481,\n          0.046,\n          0.9945\n        ]\n      }\n    }\n  ]\n}",
-  "camera_json": "{\n  \"camera\": {\n    \"keyframes\": [\n      {\n        \"frame\": 0,\n        \"zoom\": 1.0,\n        \"pan\": [\n          0.0,\n          0.0\n        ],\n        \"rotation\": 0.0\n      },\n      {\n        \"frame\": 48,\n        \"zoom\": 1.8,\n        \"pan\": [\n          50.0,\n          -30.0\n        ],\n        \"rotation\": 0.0\n      }\n    ]\n  }\n}",
-  "point_json": "{\n  \"points\": [\n    {\n      \"frames\": {\n        \"0\": [\n          0.4967,\n          0.6213\n        ]\n      }\n    }\n  ]\n}",
+  "bbox_json": {
+    "objects": [
+      {
+        "frames": {
+          "0": [
+            0.3471,
+            0.2487,
+            0.6468,
+            0.47265
+          ],
+          "48": [
+            0.5871,
+            0.2487,
+            0.8868,
+            0.4727
+          ]
+        }
+      }
+    ]
+  },
+  "camera_json": {
+    "camera": {
+      "keyframes": [
+        {
+          "frame": 0,
+          "zoom": 1.0,
+          "pan": [
+            0.0,
+            0.0
+          ],
+          "rotation": 0.0
+        },
+        {
+          "frame": 48,
+          "zoom": 1.5,
+          "pan": [
+            0.0,
+            0.0
+          ],
+          "rotation": 0.0
+        }
+      ]
+    }
+  },
+  "point_json": {
+    "points": [
+      {
+        "frames": {
+          "0": [
+            0.5236,
+            0.3437
+          ]
+        }
+      },
+      {
+        "frames": {
+          "48": [
+            0.7636,
+            0.3437
+          ]
+        }
+      }
+    ]
+  },
   "gen_params": {
     "height": 480,
     "width": 832,

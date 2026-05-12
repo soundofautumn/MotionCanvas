@@ -1,0 +1,280 @@
+[
+  {
+    "round": 0,
+    "type": "tool_calls",
+    "calls": [
+      {
+        "id": "functions.gdino_detect_bbox:0",
+        "name": "gdino_detect_bbox",
+        "arguments": {
+          "query": "a bear",
+          "box_threshold": 0.3,
+          "text_threshold": 0.25
+        }
+      },
+      {
+        "id": "functions.gdino_sam_detect_point:1",
+        "name": "gdino_sam_detect_point",
+        "arguments": {
+          "query": "bear",
+          "point_method": "centroid"
+        }
+      }
+    ],
+    "results": [
+      {
+        "id": "functions.gdino_detect_bbox:0",
+        "content": {
+          "ok": true,
+          "found": true,
+          "frame": 0,
+          "query": "a bear",
+          "score": 0.9165468811988831,
+          "bbox_norm": [
+            0.1519,
+            0.5667,
+            0.4152,
+            0.68502
+          ]
+        }
+      },
+      {
+        "id": "functions.gdino_sam_detect_point:1",
+        "content": {
+          "ok": true,
+          "found": true,
+          "frame": 0,
+          "query": "bear",
+          "point_method": "centroid",
+          "sam_used": true,
+          "score": 0.8453121185302734,
+          "bbox_norm": [
+            0.1525,
+            0.574,
+            0.4105,
+            0.6893199999999999
+          ],
+          "point_norm": [
+            0.3212,
+            0.652
+          ],
+          "point_json": {
+            "points": [
+              {
+                "frames": {
+                  "0": [
+                    0.3212,
+                    0.652
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      }
+    ]
+  },
+  {
+    "round": 1,
+    "type": "tool_calls",
+    "calls": [
+      {
+        "id": "functions.bbox_translate:2",
+        "name": "bbox_translate",
+        "arguments": {
+          "start_frame": 0,
+          "end_frame": 48,
+          "dx": 0.4,
+          "dy": 0,
+          "space": "norm",
+          "transition": "linear"
+        }
+      },
+      {
+        "id": "functions.points_translate:3",
+        "name": "points_translate",
+        "arguments": {
+          "start_frame": 0,
+          "end_frame": 48,
+          "dx": 0.4,
+          "dy": 0,
+          "space": "norm",
+          "transition": "linear"
+        }
+      },
+      {
+        "id": "functions.camera_zoom_linear:4",
+        "name": "camera_zoom_linear",
+        "arguments": {
+          "start_frame": 0,
+          "end_frame": 48,
+          "start": 1.0,
+          "end": 1.2
+        }
+      },
+      {
+        "id": "functions.set_generation_params:5",
+        "name": "set_generation_params",
+        "arguments": {
+          "prompt": "A brown bear walking from left to right across a forest meadow near a lake, natural lighting, cinematic, high quality"
+        }
+      }
+    ],
+    "results": [
+      {
+        "id": "functions.bbox_translate:2",
+        "content": {
+          "ok": true,
+          "applied": "bbox_translate",
+          "bbox_json": {
+            "objects": [
+              {
+                "frames": {
+                  "0": [
+                    0.1519,
+                    0.5667,
+                    0.4152,
+                    0.68502
+                  ],
+                  "48": [
+                    0.9519,
+                    0.5667,
+                    1.0,
+                    0.685
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "functions.points_translate:3",
+        "content": {
+          "ok": true,
+          "applied": "points_translate",
+          "point_frames_before": [
+            0
+          ],
+          "point_frames_after": [
+            0,
+            48
+          ],
+          "point_json": {
+            "points": [
+              {
+                "frames": {
+                  "0": [
+                    0.3212,
+                    0.652
+                  ]
+                }
+              },
+              {
+                "frames": {
+                  "48": [
+                    1.0,
+                    0.652
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "functions.camera_zoom_linear:4",
+        "content": {
+          "ok": true,
+          "applied": "camera_zoom_linear"
+        }
+      },
+      {
+        "id": "functions.set_generation_params:5",
+        "content": {
+          "ok": true,
+          "applied": "set_generation_params"
+        }
+      }
+    ]
+  },
+  {
+    "round": 2,
+    "type": "final_result",
+    "bbox_json": {
+      "objects": [
+        {
+          "frames": {
+            "0": [
+              0.1519,
+              0.5667,
+              0.4152,
+              0.68502
+            ],
+            "48": [
+              0.9519,
+              0.5667,
+              1.0,
+              0.685
+            ]
+          }
+        }
+      ]
+    },
+    "camera_json": {
+      "camera": {
+        "keyframes": [
+          {
+            "frame": 0,
+            "zoom": 1.0,
+            "pan": [
+              0.0,
+              0.0
+            ],
+            "rotation": 0.0
+          },
+          {
+            "frame": 48,
+            "zoom": 1.2,
+            "pan": [
+              0.0,
+              0.0
+            ],
+            "rotation": 0.0
+          }
+        ]
+      }
+    },
+    "point_json": {
+      "points": [
+        {
+          "frames": {
+            "0": [
+              0.3212,
+              0.652
+            ]
+          }
+        },
+        {
+          "frames": {
+            "48": [
+              1.0,
+              0.652
+            ]
+          }
+        }
+      ]
+    },
+    "prompt": "A brown bear walking from left to right across a forest meadow near a lake, natural lighting, cinematic, high quality",
+    "gen_params": {
+      "height": 480,
+      "width": 832,
+      "num_frames": 49,
+      "fps": 15,
+      "num_inference_steps": 50,
+      "cfg_scale": 5.0,
+      "sigma_shift": 5.0,
+      "seed": 42
+    }
+  }
+]

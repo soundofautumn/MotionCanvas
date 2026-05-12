@@ -1,26 +1,43 @@
 {
   "experiment": "07_bear_llm",
-  "timestamp": "2026-05-11T07:42:43+00:00",
+  "timestamp": "2026-05-12T06:11:50+00:00",
   "image": "data/input_img/bear.jpg",
-  "instruction": "a bear walking in a forest, sunlight through trees, the bear walks from left to right, camera zooms in slightly",
-  "prompt": "A bear walking in a forest, sunlight through trees, cinematic lighting, high quality, detailed fur, natural environment",
+  "instruction": "a bear walks from left to right. Camera gently zooms in.",
+  "prompt": "A brown bear walking from left to right across a forest meadow near a lake, natural lighting, cinematic, high quality",
   "seed": 42,
   "mode": "llm",
   "llm": {
-    "instruction": "a bear walking in a forest, sunlight through trees, the bear walks from left to right, camera zooms in slightly",
+    "instruction": "a bear walks from left to right. Camera gently zooms in.",
     "model": "Pro/moonshotai/Kimi-K2.5",
-    "duration_sec": 36.58,
+    "duration_sec": 25.84,
     "status": "✅ 已应用 LLM 更新",
-    "tool_calls": [],
+    "tool_rounds": [
+      {
+        "round": 0,
+        "calls": [
+          "gdino_detect_bbox",
+          "gdino_sam_detect_point"
+        ]
+      },
+      {
+        "round": 1,
+        "calls": [
+          "bbox_translate",
+          "points_translate",
+          "camera_zoom_linear",
+          "set_generation_params"
+        ]
+      }
+    ],
     "error": null
   },
   "signal_building": {
-    "duration_sec": 0.47,
+    "duration_sec": 0.45,
     "has_bbox_mask": true,
     "has_track_video": true
   },
   "generation": {
-    "duration_sec": 510.18,
+    "duration_sec": 510.36,
     "num_frames": 49,
     "num_inference_steps": 50,
     "width": 832,
@@ -31,6 +48,6 @@
     "fps": 15,
     "success": true
   },
-  "total_duration_sec": 548.34,
+  "total_duration_sec": 537.6,
   "error": null
 }

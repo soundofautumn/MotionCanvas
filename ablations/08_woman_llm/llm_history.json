@@ -1,10 +1,10 @@
 [
   {
     "role": "user",
-    "content": "a woman walking on a street, soft natural lighting, shallow depth of field, the woman walks from right to left, camera slowly zooms in on her face"
+    "content": "a woman turns her head right. Camera slowly zooms in on her face"
   },
   {
     "role": "assistant",
-    "content": "已完成所有设置！以下是配置摘要：\n\n**生成参数：**\n- Prompt: \"a woman walking on a street, soft natural lighting, shallow depth of field, cinematic shot, high quality\"\n- 帧数: 49帧 (约3.3秒)\n- FPS: 15\n\n**运动设置：**\n1. **女人从右向左行走**：bbox 从画面右侧 (x=0.35) 平滑移动到左侧 (x=0.0)\n2. **相机缓慢推近**：zoom 从 1.0 逐渐放大到 1.8，模拟聚焦到脸部的效果\n3. **相机跟随平移**：向右平移 50px、向上微调 -30px，保持女人在画面中心\n4. **点轨迹**：已设置女人身体中心点作为运动参考\n\n现在可以开始生成视频了！"
+    "content": "已完成所有配置！现在可以生成视频了。\n\n**设置总结：**\n\n1. **Prompt**: \"A woman with sunglasses and a camera turns her head to the right, looking away from camera, natural head movement, outdoor cruise ship background, sunny day, cinematic lighting, high quality video\"\n\n2. **相机运动**: 从第0帧到第48帧，zoom 从 1.0 缓慢放大到 1.5（聚焦到脸部）\n\n3. **物体运动（转头）**: \n   - 头部 bbox 从 `[0.347, 0.249, 0.647, 0.473]` 向右平移到 `[0.587, 0.249, 0.887, 0.473]`\n   - 面部中心点从 `[0.524, 0.344]` 向右移动到 `[0.764, 0.344]`\n\n4. **生成参数**: 49帧，15fps，480x832分辨率\n\n视频将展示：女人戴着墨镜拿着相机，慢慢将头转向右侧，同时相机逐渐放大到她的脸部。"
   }
 ]

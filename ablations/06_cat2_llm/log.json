@@ -1,26 +1,47 @@
 {
   "experiment": "06_cat2_llm",
-  "timestamp": "2026-05-11T07:33:02+00:00",
+  "timestamp": "2026-05-12T06:02:44+00:00",
   "image": "data/input_img/cat2.png",
-  "instruction": "a cat sitting on the left side, then walks to the center of the frame",
-  "prompt": "A tabby cat walking from left to center of the frame, smooth movement, natural gait, garden background with green foliage, soft natural lighting, high quality video",
+  "instruction": "a cat looks left, then walk from the center to the right. Camera static.",
+  "prompt": "A tabby cat sitting on a stone in a garden, looking to the left, then standing up and walking to the right, natural movement, detailed fur, outdoor scene with green plants and trees, cinematic lighting, high quality",
   "seed": 42,
   "mode": "llm",
   "llm": {
-    "instruction": "a cat sitting on the left side, then walks to the center of the frame",
+    "instruction": "a cat looks left, then walk from the center to the right. Camera static.",
     "model": "Pro/moonshotai/Kimi-K2.5",
-    "duration_sec": 68.24,
+    "duration_sec": 33.88,
     "status": "✅ 已应用 LLM 更新",
-    "tool_calls": [],
+    "tool_rounds": [
+      {
+        "round": 0,
+        "calls": [
+          "gdino_detect_bbox"
+        ]
+      },
+      {
+        "round": 1,
+        "calls": [
+          "gdino_sam_detect_point"
+        ]
+      },
+      {
+        "round": 2,
+        "calls": [
+          "bbox_translate",
+          "points_translate",
+          "set_generation_params"
+        ]
+      }
+    ],
     "error": null
   },
   "signal_building": {
-    "duration_sec": 0.48,
+    "duration_sec": 0.47,
     "has_bbox_mask": true,
     "has_track_video": true
   },
   "generation": {
-    "duration_sec": 511.23,
+    "duration_sec": 510.35,
     "num_frames": 49,
     "num_inference_steps": 50,
     "width": 832,
@@ -31,6 +52,6 @@
     "fps": 15,
     "success": true
   },
-  "total_duration_sec": 581.02,
+  "total_duration_sec": 545.6,
   "error": null
 }

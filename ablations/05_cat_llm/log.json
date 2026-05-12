@@ -1,26 +1,42 @@
 {
   "experiment": "05_cat_llm",
-  "timestamp": "2026-05-11T07:24:01+00:00",
+  "timestamp": "2026-05-12T05:53:38+00:00",
   "image": "data/input_img/cat.png",
-  "instruction": "a cat walking on a sunny beach, cinematic lighting, the cat walks from left to right",
-  "prompt": "a cat walking on a sunny beach, cinematic lighting, ocean waves, detailed fur, high quality",
+  "instruction": "a cat is walking. Camera stays still.",
+  "prompt": "A cat walking on a soft pink cushion, realistic fur texture, gray and white tabby cat, indoor natural lighting, smooth movement, high quality",
   "seed": 42,
   "mode": "llm",
   "llm": {
-    "instruction": "a cat walking on a sunny beach, cinematic lighting, the cat walks from left to right",
+    "instruction": "a cat is walking. Camera stays still.",
     "model": "Pro/moonshotai/Kimi-K2.5",
-    "duration_sec": 29.08,
+    "duration_sec": 36.34,
     "status": "✅ 已应用 LLM 更新",
-    "tool_calls": [],
+    "tool_rounds": [
+      {
+        "round": 0,
+        "calls": [
+          "gdino_detect_bbox",
+          "gdino_sam_detect_point"
+        ]
+      },
+      {
+        "round": 1,
+        "calls": [
+          "bbox_translate",
+          "points_translate",
+          "set_generation_params"
+        ]
+      }
+    ],
     "error": null
   },
   "signal_building": {
-    "duration_sec": 0.37,
+    "duration_sec": 0.54,
     "has_bbox_mask": true,
     "has_track_video": true
   },
   "generation": {
-    "duration_sec": 510.28,
+    "duration_sec": 508.17,
     "num_frames": 49,
     "num_inference_steps": 50,
     "width": 832,
@@ -31,6 +47,6 @@
     "fps": 15,
     "success": true
   },
-  "total_duration_sec": 540.99,
+  "total_duration_sec": 546.22,
   "error": null
 }

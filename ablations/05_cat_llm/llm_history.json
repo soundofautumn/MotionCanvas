@@ -1,10 +1,10 @@
 [
   {
     "role": "user",
-    "content": "a cat walking on a sunny beach, cinematic lighting, the cat walks from left to right"
+    "content": "a cat is walking. Camera stays still."
   },
   {
     "role": "assistant",
-    "content": "已完成所有配置！🎬\n\n**设置摘要：**\n- **Prompt**: \"a cat walking on a sunny beach, cinematic lighting, ocean waves, detailed fur, high quality\"\n- **猫咪运动**: 从左向右行走\n  - Bbox: 从画面左侧 (x=0.09) 平滑移动到右侧 (x=0.69)\n  - 轨迹点: 从中心位置向右移动\n- **视频参数**: 49帧, 15fps, 480x832分辨率\n\n现在可以开始生成视频了！模型会根据这些条件生成一只猫咪在阳光海滩上从左向右行走的画面。"
+    "content": "已完成设置！以下是配置摘要：\n\n**物体运动**：\n- 猫从画面左侧（x≈0.09）向右行走至画面中间偏右（x≈0.59）\n- 运动轨迹覆盖全部 49 帧，平滑线性移动\n\n**相机**：\n- 保持静止（无 camera 关键帧）\n\n**生成参数**：\n- Prompt: \"A cat walking on a soft pink cushion, realistic fur texture, gray and white tabby cat, indoor natural lighting, smooth movement, high quality\"\n- 其他参数保持默认（480x832, 49帧, 15fps）\n\n现在可以开始生成视频了！"
   }
 ]

@@ -3,7 +3,26 @@
   "has_bbox": true,
   "has_camera": false,
   "has_point": false,
-  "bbox_json": "{\"objects\": [{\"frames\": {\"0\": [0.1, 0.25, 0.4, 0.8], \"24\": [0.55, 0.25, 0.85, 0.8]}}]}",
+  "bbox_json": {
+    "objects": [
+      {
+        "frames": {
+          "0": [
+            0.1,
+            0.25,
+            0.4,
+            0.8
+          ],
+          "24": [
+            0.55,
+            0.25,
+            0.85,
+            0.8
+          ]
+        }
+      }
+    ]
+  },
   "camera_json": "",
   "point_json": "",
   "gen_params": {

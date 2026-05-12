@@ -1,10 +1,10 @@
 [
   {
     "role": "user",
-    "content": "a cat sitting on the left side, then walks to the center of the frame"
+    "content": "a cat looks left, then walk from the center to the right. Camera static."
   },
   {
     "role": "assistant",
-    "content": "已完成设置！现在猫会从画面左侧走到中央：\n\n**运动轨迹配置：**\n- **起始位置（第0帧）**：猫位于画面左侧，bbox中心约在 x=0.43\n- **结束位置（第48帧）**：猫移动到画面中央，bbox中心约在 x=0.53\n- **运动方式**：线性平滑移动，从左侧走到正中央\n\n**生成参数：**\n- Prompt: \"A tabby cat walking from left to center of the frame, smooth movement, natural gait, garden background with green foliage, soft natural lighting, high quality video\"\n- 49帧，15fps，约3.2秒视频\n\n现在可以生成视频了，猫会从左侧自然地走到画面中央。"
+    "content": "已完成设置！以下是配置摘要：\n\n**运动设计：**\n- **0-12帧**：猫保持静止，向左看（look left）\n- **12-48帧**：猫从画面中心向右行走，最终到达右侧边缘\n\n**相机**：保持静态（无 camera 运动）\n\n**Prompt**：已更新为描述猫在花园中先向左看，然后向右行走的场景\n\n现在可以生成视频了。"
   }
 ]

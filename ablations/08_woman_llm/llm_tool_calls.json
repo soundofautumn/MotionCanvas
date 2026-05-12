@@ -1,0 +1,298 @@
+[
+  {
+    "round": 0,
+    "type": "tool_calls",
+    "calls": [
+      {
+        "id": "functions.gdino_detect_bbox:0",
+        "name": "gdino_detect_bbox",
+        "arguments": {
+          "query": "woman's head",
+          "box_threshold": 0.3,
+          "text_threshold": 0.25
+        }
+      }
+    ],
+    "results": [
+      {
+        "id": "functions.gdino_detect_bbox:0",
+        "content": {
+          "ok": true,
+          "found": true,
+          "frame": 0,
+          "query": "woman's head",
+          "score": 0.8161234259605408,
+          "bbox_norm": [
+            0.3471,
+            0.2487,
+            0.6468,
+            0.47265
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "round": 1,
+    "type": "tool_calls",
+    "calls": [
+      {
+        "id": "functions.gdino_sam_detect_point:1",
+        "name": "gdino_sam_detect_point",
+        "arguments": {
+          "query": "woman's face center",
+          "point_method": "centroid",
+          "box_threshold": 0.3,
+          "text_threshold": 0.25
+        }
+      },
+      {
+        "id": "functions.camera_zoom_linear:2",
+        "name": "camera_zoom_linear",
+        "arguments": {
+          "start_frame": 0,
+          "end_frame": 48,
+          "start": 1.0,
+          "end": 1.5
+        }
+      }
+    ],
+    "results": [
+      {
+        "id": "functions.gdino_sam_detect_point:1",
+        "content": {
+          "ok": true,
+          "found": true,
+          "frame": 0,
+          "query": "woman's face center",
+          "point_method": "centroid",
+          "sam_used": true,
+          "score": 0.8582423329353333,
+          "bbox_norm": [
+            0.3472,
+            0.2453,
+            0.649,
+            0.47080999999999995
+          ],
+          "point_norm": [
+            0.5236,
+            0.3437
+          ],
+          "point_json": {
+            "points": [
+              {
+                "frames": {
+                  "0": [
+                    0.5236,
+                    0.3437
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "functions.camera_zoom_linear:2",
+        "content": {
+          "ok": true,
+          "applied": "camera_zoom_linear"
+        }
+      }
+    ]
+  },
+  {
+    "round": 2,
+    "type": "tool_calls",
+    "calls": [
+      {
+        "id": "functions.set_generation_params:3",
+        "name": "set_generation_params",
+        "arguments": {
+          "prompt": "A woman with sunglasses and a camera turns her head to the right, looking away from camera, natural head movement, outdoor cruise ship background, sunny day, cinematic lighting, high quality video"
+        }
+      }
+    ],
+    "results": [
+      {
+        "id": "functions.set_generation_params:3",
+        "content": {
+          "ok": true,
+          "applied": "set_generation_params"
+        }
+      }
+    ]
+  },
+  {
+    "round": 3,
+    "type": "tool_calls",
+    "calls": [
+      {
+        "id": "functions.bbox_translate:4",
+        "name": "bbox_translate",
+        "arguments": {
+          "start_frame": 0,
+          "end_frame": 48,
+          "dx": 0.12,
+          "dy": 0,
+          "space": "norm",
+          "transition": "linear"
+        }
+      },
+      {
+        "id": "functions.points_translate:5",
+        "name": "points_translate",
+        "arguments": {
+          "start_frame": 0,
+          "end_frame": 48,
+          "dx": 0.12,
+          "dy": 0,
+          "space": "norm",
+          "transition": "linear"
+        }
+      }
+    ],
+    "results": [
+      {
+        "id": "functions.bbox_translate:4",
+        "content": {
+          "ok": true,
+          "applied": "bbox_translate",
+          "bbox_json": {
+            "objects": [
+              {
+                "frames": {
+                  "0": [
+                    0.3471,
+                    0.2487,
+                    0.6468,
+                    0.47265
+                  ],
+                  "48": [
+                    0.5871,
+                    0.2487,
+                    0.8868,
+                    0.4727
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "functions.points_translate:5",
+        "content": {
+          "ok": true,
+          "applied": "points_translate",
+          "point_frames_before": [
+            0
+          ],
+          "point_frames_after": [
+            0,
+            48
+          ],
+          "point_json": {
+            "points": [
+              {
+                "frames": {
+                  "0": [
+                    0.5236,
+                    0.3437
+                  ]
+                }
+              },
+              {
+                "frames": {
+                  "48": [
+                    0.7636,
+                    0.3437
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      }
+    ]
+  },
+  {
+    "round": 4,
+    "type": "final_result",
+    "bbox_json": {
+      "objects": [
+        {
+          "frames": {
+            "0": [
+              0.3471,
+              0.2487,
+              0.6468,
+              0.47265
+            ],
+            "48": [
+              0.5871,
+              0.2487,
+              0.8868,
+              0.4727
+            ]
+          }
+        }
+      ]
+    },
+    "camera_json": {
+      "camera": {
+        "keyframes": [
+          {
+            "frame": 0,
+            "zoom": 1.0,
+            "pan": [
+              0.0,
+              0.0
+            ],
+            "rotation": 0.0
+          },
+          {
+            "frame": 48,
+            "zoom": 1.5,
+            "pan": [
+              0.0,
+              0.0
+            ],
+            "rotation": 0.0
+          }
+        ]
+      }
+    },
+    "point_json": {
+      "points": [
+        {
+          "frames": {
+            "0": [
+              0.5236,
+              0.3437
+            ]
+          }
+        },
+        {
+          "frames": {
+            "48": [
+              0.7636,
+              0.3437
+            ]
+          }
+        }
+      ]
+    },
+    "prompt": "A woman with sunglasses and a camera turns her head to the right, looking away from camera, natural head movement, outdoor cruise ship background, sunny day, cinematic lighting, high quality video",
+    "gen_params": {
+      "height": 480,
+      "width": 832,
+      "num_frames": 49,
+      "fps": 15,
+      "num_inference_steps": 50,
+      "cfg_scale": 5.0,
+      "sigma_shift": 5.0,
+      "seed": 42
+    }
+  }
+]

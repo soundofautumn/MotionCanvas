@@ -1,0 +1,271 @@
+[
+  {
+    "round": 0,
+    "type": "tool_calls",
+    "calls": [
+      {
+        "id": "functions.gdino_detect_bbox:0",
+        "name": "gdino_detect_bbox",
+        "arguments": {
+          "query": "a cat",
+          "box_threshold": 0.3,
+          "text_threshold": 0.25
+        }
+      }
+    ],
+    "results": [
+      {
+        "id": "functions.gdino_detect_bbox:0",
+        "content": {
+          "ok": true,
+          "found": true,
+          "frame": 0,
+          "query": "a cat",
+          "score": 0.823523759841919,
+          "bbox_norm": [
+            0.4778,
+            0.3035,
+            0.7808,
+            0.9814
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "round": 1,
+    "type": "tool_calls",
+    "calls": [
+      {
+        "id": "functions.gdino_sam_detect_point:1",
+        "name": "gdino_sam_detect_point",
+        "arguments": {
+          "query": "a cat",
+          "point_method": "centroid",
+          "box_threshold": 0.3,
+          "text_threshold": 0.25
+        }
+      }
+    ],
+    "results": [
+      {
+        "id": "functions.gdino_sam_detect_point:1",
+        "content": {
+          "ok": true,
+          "found": true,
+          "frame": 0,
+          "query": "a cat",
+          "point_method": "centroid",
+          "sam_used": true,
+          "score": 0.823523759841919,
+          "bbox_norm": [
+            0.4778,
+            0.3035,
+            0.7808,
+            0.9814
+          ],
+          "point_norm": [
+            0.584,
+            0.6746
+          ],
+          "point_json": {
+            "points": [
+              {
+                "frames": {
+                  "0": [
+                    0.584,
+                    0.6746
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      }
+    ]
+  },
+  {
+    "round": 2,
+    "type": "tool_calls",
+    "calls": [
+      {
+        "id": "functions.bbox_translate:2",
+        "name": "bbox_translate",
+        "arguments": {
+          "start_frame": 12,
+          "end_frame": 48,
+          "dx": 0.25,
+          "dy": 0,
+          "space": "norm",
+          "transition": "linear"
+        }
+      },
+      {
+        "id": "functions.points_translate:3",
+        "name": "points_translate",
+        "arguments": {
+          "start_frame": 12,
+          "end_frame": 48,
+          "dx": 0.25,
+          "dy": 0,
+          "space": "norm",
+          "transition": "linear"
+        }
+      },
+      {
+        "id": "functions.set_generation_params:4",
+        "name": "set_generation_params",
+        "arguments": {
+          "prompt": "A tabby cat sitting on a stone in a garden, looking to the left, then standing up and walking to the right, natural movement, detailed fur, outdoor scene with green plants and trees, cinematic lighting, high quality"
+        }
+      }
+    ],
+    "results": [
+      {
+        "id": "functions.bbox_translate:2",
+        "content": {
+          "ok": true,
+          "applied": "bbox_translate",
+          "bbox_json": {
+            "objects": [
+              {
+                "frames": {
+                  "0": [
+                    0.4778,
+                    0.3035,
+                    0.7808,
+                    0.9814
+                  ],
+                  "12": [
+                    0.4778,
+                    0.3035,
+                    0.7808,
+                    0.9814
+                  ],
+                  "48": [
+                    0.9778,
+                    0.3035,
+                    1.0,
+                    0.9814
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "functions.points_translate:3",
+        "content": {
+          "ok": true,
+          "applied": "points_translate",
+          "point_frames_before": [
+            0
+          ],
+          "point_frames_after": [
+            0,
+            12,
+            48
+          ],
+          "point_json": {
+            "points": [
+              {
+                "frames": {
+                  "0": [
+                    0.584,
+                    0.6746
+                  ],
+                  "12": [
+                    0.584,
+                    0.6746
+                  ]
+                }
+              },
+              {
+                "frames": {
+                  "48": [
+                    1.0,
+                    0.6746
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "functions.set_generation_params:4",
+        "content": {
+          "ok": true,
+          "applied": "set_generation_params"
+        }
+      }
+    ]
+  },
+  {
+    "round": 3,
+    "type": "final_result",
+    "bbox_json": {
+      "objects": [
+        {
+          "frames": {
+            "0": [
+              0.4778,
+              0.3035,
+              0.7808,
+              0.9814
+            ],
+            "12": [
+              0.4778,
+              0.3035,
+              0.7808,
+              0.9814
+            ],
+            "48": [
+              0.9778,
+              0.3035,
+              1.0,
+              0.9814
+            ]
+          }
+        }
+      ]
+    },
+    "camera_json": null,
+    "point_json": {
+      "points": [
+        {
+          "frames": {
+            "0": [
+              0.584,
+              0.6746
+            ],
+            "12": [
+              0.584,
+              0.6746
+            ]
+          }
+        },
+        {
+          "frames": {
+            "48": [
+              1.0,
+              0.6746
+            ]
+          }
+        }
+      ]
+    },
+    "prompt": "A tabby cat sitting on a stone in a garden, looking to the left, then standing up and walking to the right, natural movement, detailed fur, outdoor scene with green plants and trees, cinematic lighting, high quality",
+    "gen_params": {
+      "height": 480,
+      "width": 832,
+      "num_frames": 49,
+      "fps": 15,
+      "num_inference_steps": 50,
+      "cfg_scale": 5.0,
+      "sigma_shift": 5.0,
+      "seed": 42
+    }
+  }
+]

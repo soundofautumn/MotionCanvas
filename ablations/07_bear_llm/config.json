@@ -1,11 +1,72 @@
 {
-  "prompt": "A bear walking in a forest, sunlight through trees, cinematic lighting, high quality, detailed fur, natural environment",
+  "prompt": "A brown bear walking from left to right across a forest meadow near a lake, natural lighting, cinematic, high quality",
   "has_bbox": true,
   "has_camera": true,
   "has_point": true,
-  "bbox_json": "{\n  \"objects\": [\n    {\n      \"frames\": {\n        \"0\": [\n          0.1525,\n          0.574,\n          0.4105,\n          0.6893\n        ],\n        \"48\": [\n          0.9525,\n          0.574,\n          1.0,\n          0.6893\n        ]\n      }\n    }\n  ]\n}",
-  "camera_json": "{\n  \"camera\": {\n    \"keyframes\": [\n      {\n        \"frame\": 0,\n        \"zoom\": 1.0,\n        \"pan\": [\n          0.0,\n          0.0\n        ],\n        \"rotation\": 0.0\n      },\n      {\n        \"frame\": 48,\n        \"zoom\": 1.2,\n        \"pan\": [\n          0.0,\n          0.0\n        ],\n        \"rotation\": 0.0\n      }\n    ]\n  }\n}",
-  "point_json": "{\n  \"points\": [\n    {\n      \"frames\": {\n        \"0\": [\n          0.2815,\n          0.6317\n        ]\n      }\n    },\n    {\n      \"frames\": {\n        \"48\": [\n          1.0,\n          0.6317\n        ]\n      }\n    }\n  ]\n}",
+  "bbox_json": {
+    "objects": [
+      {
+        "frames": {
+          "0": [
+            0.1519,
+            0.5667,
+            0.4152,
+            0.68502
+          ],
+          "48": [
+            0.9519,
+            0.5667,
+            1.0,
+            0.685
+          ]
+        }
+      }
+    ]
+  },
+  "camera_json": {
+    "camera": {
+      "keyframes": [
+        {
+          "frame": 0,
+          "zoom": 1.0,
+          "pan": [
+            0.0,
+            0.0
+          ],
+          "rotation": 0.0
+        },
+        {
+          "frame": 48,
+          "zoom": 1.2,
+          "pan": [
+            0.0,
+            0.0
+          ],
+          "rotation": 0.0
+        }
+      ]
+    }
+  },
+  "point_json": {
+    "points": [
+      {
+        "frames": {
+          "0": [
+            0.3212,
+            0.652
+          ]
+        }
+      },
+      {
+        "frames": {
+          "48": [
+            1.0,
+            0.652
+          ]
+        }
+      }
+    ]
+  },
   "gen_params": {
     "height": 480,
     "width": 832,

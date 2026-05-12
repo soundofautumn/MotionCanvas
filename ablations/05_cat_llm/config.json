@@ -1,11 +1,49 @@
 {
-  "prompt": "a cat walking on a sunny beach, cinematic lighting, ocean waves, detailed fur, high quality",
+  "prompt": "A cat walking on a soft pink cushion, realistic fur texture, gray and white tabby cat, indoor natural lighting, smooth movement, high quality",
   "has_bbox": true,
   "has_camera": false,
   "has_point": true,
-  "bbox_json": "{\n  \"objects\": [\n    {\n      \"frames\": {\n        \"0\": [\n          0.09,\n          0.0436,\n          0.877,\n          0.715\n        ],\n        \"48\": [\n          0.69,\n          0.0436,\n          1.0,\n          0.715\n        ]\n      }\n    }\n  ]\n}",
+  "bbox_json": {
+    "objects": [
+      {
+        "frames": {
+          "0": [
+            0.0899,
+            0.0392,
+            0.8772,
+            0.7209
+          ],
+          "48": [
+            0.5899,
+            0.0392,
+            1.0,
+            0.7209
+          ]
+        }
+      }
+    ]
+  },
   "camera_json": "",
-  "point_json": "{\n  \"points\": [\n    {\n      \"frames\": {\n        \"0\": [\n          0.4835,\n          0.3793\n        ]\n      }\n    },\n    {\n      \"frames\": {\n        \"48\": [\n          1.0,\n          0.3793\n        ]\n      }\n    }\n  ]\n}",
+  "point_json": {
+    "points": [
+      {
+        "frames": {
+          "0": [
+            0.4888,
+            0.4096
+          ]
+        }
+      },
+      {
+        "frames": {
+          "48": [
+            0.9888,
+            0.4096
+          ]
+        }
+      }
+    ]
+  },
   "gen_params": {
     "height": 480,
     "width": 832,

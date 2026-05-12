@@ -1,11 +1,59 @@
 {
-  "prompt": "A tabby cat walking from left to center of the frame, smooth movement, natural gait, garden background with green foliage, soft natural lighting, high quality video",
+  "prompt": "A tabby cat sitting on a stone in a garden, looking to the left, then standing up and walking to the right, natural movement, detailed fur, outdoor scene with green plants and trees, cinematic lighting, high quality",
   "has_bbox": true,
   "has_camera": false,
   "has_point": true,
-  "bbox_json": "{\n  \"objects\": [\n    {\n      \"frames\": {\n        \"0\": [\n          0.28,\n          0.3035,\n          0.583,\n          0.9814\n        ],\n        \"48\": [\n          0.38,\n          0.3035,\n          0.683,\n          0.9814\n        ]\n      }\n    }\n  ]\n}",
+  "bbox_json": {
+    "objects": [
+      {
+        "frames": {
+          "0": [
+            0.4778,
+            0.3035,
+            0.7808,
+            0.9814
+          ],
+          "12": [
+            0.4778,
+            0.3035,
+            0.7808,
+            0.9814
+          ],
+          "48": [
+            0.9778,
+            0.3035,
+            1.0,
+            0.9814
+          ]
+        }
+      }
+    ]
+  },
   "camera_json": "",
-  "point_json": "{\n  \"points\": [\n    {\n      \"frames\": {\n        \"0\": [\n          0.4315,\n          0.6746\n        ],\n        \"48\": [\n          0.5315,\n          0.6746\n        ]\n      }\n    }\n  ]\n}",
+  "point_json": {
+    "points": [
+      {
+        "frames": {
+          "0": [
+            0.584,
+            0.6746
+          ],
+          "12": [
+            0.584,
+            0.6746
+          ]
+        }
+      },
+      {
+        "frames": {
+          "48": [
+            1.0,
+            0.6746
+          ]
+        }
+      }
+    ]
+  },
   "gen_params": {
     "height": 480,
     "width": 832,
