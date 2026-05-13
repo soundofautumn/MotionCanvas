@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-05-12T12:55:45+00:00",
-  "device": "cuda:0",
+  "generated_at": "2026-05-13T05:58:27+00:00",
+  "device": "cuda",
   "models": "all",
   "sample_n": 8,
   "has_reference": false,
@@ -10,28 +10,64 @@
       "prompt": "A cat walking on a soft pink cushion, realistic fur texture, gray and white tabby cat, indoor natural lighting, smooth movement, high quality",
       "seed": 42,
       "mode": "llm",
-      "image": "data/input_img/cat.png"
+      "image": "data/input_img/cat.png",
+      "quality": {
+        "ImageReward": -0.685404,
+        "Aesthetic": 4.65222,
+        "PickScore": 0.20361,
+        "CLIP": 0.283381,
+        "HPSv2": 0.244748,
+        "HPSv2.1": 0.187654,
+        "MPS": 15.403524
+      }
     },
     {
       "experiment": "06_cat2_llm",
       "prompt": "A tabby cat sitting on a stone in a garden, looking to the left, then standing up and walking to the right, natural movement, detailed fur, outdoor scene with green plants and trees, cinematic lighting, high quality",
       "seed": 42,
       "mode": "llm",
-      "image": "data/input_img/cat2.png"
+      "image": "data/input_img/cat2.png",
+      "quality": {
+        "ImageReward": 1.066565,
+        "Aesthetic": 5.129297,
+        "PickScore": 0.205451,
+        "CLIP": 0.327832,
+        "HPSv2": 0.255306,
+        "HPSv2.1": 0.190341,
+        "MPS": 12.700533
+      }
     },
     {
       "experiment": "07_bear_llm",
       "prompt": "A brown bear walking from left to right across a forest meadow near a lake, natural lighting, cinematic, high quality",
       "seed": 42,
       "mode": "llm",
-      "image": "data/input_img/bear.jpg"
+      "image": "data/input_img/bear.jpg",
+      "quality": {
+        "ImageReward": 1.211311,
+        "Aesthetic": 5.779549,
+        "PickScore": 0.210147,
+        "CLIP": 0.333096,
+        "HPSv2": 0.245546,
+        "HPSv2.1": 0.164067,
+        "MPS": 9.095077
+      }
     },
     {
       "experiment": "08_woman_llm",
       "prompt": "A woman with sunglasses and a camera turns her head to the right, looking away from camera, natural head movement, outdoor cruise ship background, sunny day, cinematic lighting, high quality video",
       "seed": 42,
       "mode": "llm",
-      "image": "data/input_img/woman.png"
+      "image": "data/input_img/woman.png",
+      "quality": {
+        "ImageReward": 1.303846,
+        "Aesthetic": 5.227041,
+        "PickScore": 0.188659,
+        "CLIP": 0.374167,
+        "HPSv2": 0.235765,
+        "HPSv2.1": 0.204545,
+        "MPS": 8.557788
+      }
     }
   ]
 }
