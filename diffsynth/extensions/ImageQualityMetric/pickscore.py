@@ -41,9 +41,11 @@ class PickScore(torch.nn.Module):
             ).to(self.device)
 
             # Embed images and text
-            image_embs = self.model.get_image_features(pixel_values=image)
+            image_outputs = self.model.get_image_features(pixel_values=image)
+            image_embs = image_outputs.pooler_output if hasattr(image_outputs, 'pooler_output') else image_outputs
             image_embs = image_embs / torch.norm(image_embs, dim=-1, keepdim=True)
-            text_embs = self.model.get_text_features(**text_inputs)
+            text_outputs = self.model.get_text_features(**text_inputs)
+            text_embs = text_outputs.pooler_output if hasattr(text_outputs, 'pooler_output') else text_outputs
             text_embs = text_embs / torch.norm(text_embs, dim=-1, keepdim=True)
 
             # Compute score
