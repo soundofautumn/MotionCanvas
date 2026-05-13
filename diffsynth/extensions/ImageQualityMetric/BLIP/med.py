@@ -555,7 +555,7 @@ class BertPreTrainedModel(PreTrainedModel):
     config_class = BertConfig
     base_model_prefix = "bert"
     _keys_to_ignore_on_load_missing = [r"position_ids"]
-    all_tied_weights_keys = []
+    all_tied_weights_keys = {}
 
     def _init_weights(self, module):
         """ Initialize the weights """
