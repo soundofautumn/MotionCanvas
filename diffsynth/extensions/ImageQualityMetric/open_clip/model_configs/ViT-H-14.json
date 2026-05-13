@@ -5,7 +5,7 @@
     "patch_size": 14,
     "width": 1280,
     "layers": 32,
-    "heads": 16,
+    "head_width": 64,
     "mlp_ratio": 4.0
   },
   "text_cfg": {
