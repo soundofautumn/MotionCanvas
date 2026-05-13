@@ -140,8 +140,8 @@ def main():
     parser = argparse.ArgumentParser(description="批量评估 ablations 下的视频质量")
     parser.add_argument(
         "--ablations_dir",
-        default=str(project_root / "ablations"),
-        help="ablations 根目录 (默认: ./ablations)",
+        default=str(project_root / "ablation_results"),
+        help="ablations 根目录 (默认: ./ablation_results)",
     )
     parser.add_argument(
         "--models", nargs="+",
@@ -162,13 +162,13 @@ def main():
     )
     parser.add_argument(
         "--summary",
-        default=str(project_root / "ablations" / "evaluation_results.json"),
-        help="汇总结果 JSON 路径 (默认: ablations/evaluation_results.json)",
+        default=str(project_root / "ablation_results" / "evaluation_results.json"),
+        help="汇总结果 JSON 路径 (默认: ablation_results/evaluation_results.json)",
     )
     parser.add_argument(
         "--summary_csv",
-        default=str(project_root / "ablations" / "evaluation_results.csv"),
-        help="汇总结果 CSV 路径 (默认: ablations/evaluation_results.csv)",
+        default=str(project_root / "ablation_results" / "evaluation_results.csv"),
+        help="汇总结果 CSV 路径 (默认: ablation_results/evaluation_results.csv)",
     )
     args = parser.parse_args()
 
@@ -209,8 +209,10 @@ def main():
         if result is not None:
             all_results.append(result)
 
-            # 每个实验单独保存一份结果
-            result_path = exp_dir / "evaluation.json"
+            # 每个实验单独保存一份结果到 ablation_results
+            results_out_dir = project_root / "ablation_results"
+            results_out_dir.mkdir(parents=True, exist_ok=True)
+            result_path = results_out_dir / f"{result['experiment']}_evaluation.json"
             result_path.write_text(json.dumps(result, indent=2, ensure_ascii=False))
             print(f"  结果已保存: {result_path}")
 
