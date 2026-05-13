@@ -85,7 +85,7 @@ class AestheticScore(torch.nn.Module):
         with torch.no_grad():
             # Get image embeddings
             outputs = self.model2.get_image_features(image)
-            image_embs = outputs.image_embeds if hasattr(outputs, 'image_embeds') else outputs
+            image_embs = outputs.pooler_output if hasattr(outputs, 'pooler_output') else outputs
             image_embs = image_embs / torch.norm(image_embs, dim=-1, keepdim=True)
 
             # Compute score
