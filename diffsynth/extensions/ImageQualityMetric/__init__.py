@@ -133,7 +133,7 @@ model_dict = {
 }
 
 
-def download_preference_model(model_name: preference_model_id, cache_dir="models"):
+def download_preference_model(model_name: preference_model_id, cache_dir="/root/autodl-tmp/models"):
     metadata = model_dict[model_name]
     snapshot_download(model_id=metadata["model_id"], allow_file_pattern=metadata["allow_file_pattern"], cache_dir=cache_dir)
     load_path = metadata["load_path"]
