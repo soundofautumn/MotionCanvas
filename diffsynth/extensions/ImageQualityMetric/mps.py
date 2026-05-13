@@ -3,7 +3,7 @@ import torch
 from PIL import Image
 from io import BytesIO
 from tqdm.auto import tqdm
-from transformers import CLIPFeatureExtractor, CLIPImageProcessor
+from transformers import CLIPImageProcessor
 from transformers import CLIPConfig
 from dataclasses import dataclass
 from transformers import CLIPModel as HFCLIPModel

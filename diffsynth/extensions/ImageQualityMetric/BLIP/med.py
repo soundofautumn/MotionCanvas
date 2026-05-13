@@ -30,12 +30,21 @@ from transformers.modeling_outputs import (
 )
 from transformers.modeling_utils import (
     PreTrainedModel,
-    apply_chunking_to_forward,
-    find_pruneable_heads_and_indices,
-    prune_linear_layer,
 )
+from transformers.pytorch_utils import apply_chunking_to_forward, prune_linear_layer
 from transformers.utils import logging
 from transformers.models.bert.configuration_bert import BertConfig
+
+
+# Backward compatibility: find_pruneable_heads_and_indices was removed in transformers 5.x
+def find_pruneable_heads_and_indices(heads, n_heads, head_size, pruned_heads):
+    """Find which heads to prune and compute the indices of remaining heads."""
+    kept_heads = set(range(n_heads)) - set(heads)
+    kept_heads = kept_heads - set(pruned_heads)
+    indices = []
+    for head in kept_heads:
+        indices.extend(list(range(head * head_size, (head + 1) * head_size)))
+    return kept_heads, torch.tensor(indices, dtype=torch.long)
 
 
 logger = logging.get_logger(__name__)
