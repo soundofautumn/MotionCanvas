@@ -492,83 +492,50 @@ def render_track_video_grid(
     else:
         return [f.convert("RGB") for f in frames]
 
-    # 上采样到原始分辨率
-    act_5d = activation.unsqueeze(0).unsqueeze(0)  # (1, 1, T', H', W')
-    act_5d = F.interpolate(
-        act_5d, size=(T, H, W), mode="trilinear", align_corners=False,
-    )
-    act_map = act_5d.squeeze().cpu().numpy()  # (T, H, W)
+    # 在低分辨率格点上直接采样（避免上采样模糊导致点聚集）
+    # track_video 特征图尺寸为 (1, C, T', H', W')，格点步长 = 原图 / 特征图
+    _, C, Tp, Hp, Wp = track_video.shape
+    act_low = activation.cpu().numpy()  # (Tp, Hp, Wp)
+    # 每个格点覆盖的像素区域
+    scale_y = H / Hp
+    scale_x = W / Wp
 
     rendered: List[Image.Image] = []
     for t in range(T):
+        # 找到当前时间步对应的特征帧（线性映射）
+        tf = min(int(round(t * (Tp - 1) / max(T - 1, 1))), Tp - 1)
+
         frame = frames[t].convert("RGB").copy()
         draw = ImageDraw.Draw(frame)
 
-        heat = act_map[t]  # (H, W)
+        # 在 Hp x Wp 的格点中，找到激活 > 阈值的格点中心坐标
+        mask = act_low[tf] > min_activation
+        if not mask.any():
+            # 保底：取最强激活的一定数量格点
+            flat = act_low[tf].flatten()
+            threshold = np.sort(flat)[::-1][min(num_points, len(flat) - 1)]
+            mask = act_low[tf] > threshold
 
-        # 找到激活最强的像素位置
-        flat = heat.flatten()
-        sorted_idx = np.argsort(flat)[::-1]
         count = 0
-        for idx in sorted_idx:
-            if flat[idx] < min_activation:
-                break
+        for hy in range(Hp):
+            for wx in range(Wp):
+                if not mask[hy, wx]:
+                    continue
+                # 格点中心在原图中的像素坐标
+                cx = int((wx + 0.5) * scale_x)
+                cy = int((hy + 0.5) * scale_y)
+                draw.ellipse(
+                    [(cx - point_radius, cy - point_radius),
+                     (cx + point_radius, cy + point_radius)],
+                    fill=color,
+                )
+                count += 1
+                if count >= num_points:
+                    break
             if count >= num_points:
                 break
-            y, x = divmod(idx, W)
-            draw.ellipse(
-                [(x - point_radius, y - point_radius),
-                 (x + point_radius, y + point_radius)],
-                fill=color,
-            )
-            count += 1
 
         rendered.append(frame)
-
-    return rendered
-
-    # (1, C, T', H', W') -> 沿 channel 求 norm -> (T', H', W')
-    activation = track_video.squeeze(0).norm(dim=0)  # (T', H', W')
-
-    # 确保 float32（bfloat16 不支持 CPU interpolate）
-    if activation.dtype != torch.float32:
-        activation = activation.to(torch.float32)
-
-    # 归一化到 [0, 1]
-    act_min = activation.min()
-    act_max = activation.max()
-    if act_max > act_min:
-        activation = (activation - act_min) / (act_max - act_min)
-    else:
-        activation = torch.zeros_like(activation)
-
-    # Resample 到原始时间/空间分辨率
-    T_prime, H_prime, W_prime = activation.shape
-    act_5d = activation.unsqueeze(0).unsqueeze(0)  # (1, 1, T', H', W')
-    act_5d = F.interpolate(
-        act_5d, size=(T, H, W), mode="trilinear", align_corners=False,
-    )
-    act_map = act_5d.squeeze().cpu().numpy()  # (T, H, W)
-
-    # 加载 matplotlib colormap
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.cm as cm
-
-    cmap = cm.get_cmap(colormap)
-
-    rendered: List[Image.Image] = []
-    for t in range(T):
-        frame = frames[t].convert("RGBA").copy()
-
-        # 当前帧的激活图 (H, W)
-        heat = act_map[t]
-        heat_rgba = (cmap(heat, alpha=alpha) * 255).astype(np.uint8)  # (H, W, 4)
-        heat_img = Image.fromarray(heat_rgba, "RGBA")
-
-        # 叠加到原帧（heat_img 的 alpha 通道控制透明度）
-        frame.alpha_composite(heat_img)
-        rendered.append(frame.convert("RGB"))
 
     return rendered
 
