@@ -526,28 +526,6 @@ def render_track_video_grid(
         rendered.append(frame)
 
     return rendered
-    alpha: float = 0.35,
-    colormap: str = "viridis",
-) -> List[Image.Image]:
-    """将 track_video 特征图的激活强度可视化为热力图叠加层。
-
-    `track_video.pt` 是 `build_track_video_from_tracks` 输出的特征图，
-    形状为 `(1, C, T', H', W')`（C=64, T'≈T/4, H'=H/8, W'=W/8）。
-    通过对 channel 维度求 norm 得到激活强度，再上采样到原始分辨率。
-
-    Args:
-        frames: 原始视频帧 (RGB PIL Image 列表)。
-        track_video: (1, C, T', H', W') 张量。
-        alpha: 热力图叠加透明度。
-        colormap: matplotlib colormap 名称（'viridis', 'jet', 'plasma' 等）。
-
-    Returns:
-        渲染后的 RGB PIL Image 列表。
-    """
-    import torch.nn.functional as F
-
-    T = len(frames)
-    H, W = frames[0].height, frames[0].width
 
     # (1, C, T', H', W') -> 沿 channel 求 norm -> (T', H', W')
     activation = track_video.squeeze(0).norm(dim=0)  # (T', H', W')
