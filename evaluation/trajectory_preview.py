@@ -405,8 +405,11 @@ def render_from_bbox_mask(
     # 渲染
     rendered: List[Image.Image] = []
     for t in range(T):
-        frame_copy = frames[t].convert("RGBA").copy()
-        draw = ImageDraw.Draw(frame_copy)
+        # 背景层（原始帧）
+        bg = frames[t].convert("RGBA").copy()
+        # 叠加层（全透明，在上面画填充和线条）
+        overlay = Image.new("RGBA", bg.size, (0, 0, 0, 0))
+        draw = ImageDraw.Draw(overlay)
 
         bboxes = per_frame_bboxes[t]
 
@@ -415,11 +418,10 @@ def render_from_bbox_mask(
             color = colors[obj_idx % len(colors)]
             fill_color = color + (int(255 * fill_alpha),)
 
-            # === GUI 风格: 半透明填充 + 实线边框 ===
+            # 半透明填充（画在叠加层上）
             draw.rectangle([x1, y1, x2, y2], fill=fill_color, outline=None)
-            draw.rectangle([x1, y1, x2, y2], outline=color, width=line_width)
 
-        # === GUI 风格: 橙色中心轨迹拖尾 ===
+        # === 橙色中心轨迹拖尾（也画在叠加层上） ===
         if draw_trajectory and obj_centers:
             tail_len = min(trail_length, t)
             for oi in range(len(obj_centers)):
@@ -434,9 +436,18 @@ def render_from_bbox_mask(
                     line_color = trajectory_color + (alpha,)
                     draw.line([curr_pos, next_pos], fill=line_color, width=line_width)
 
-        rendered.append(frame_copy.convert("RGB"))
+        # 合成：叠加层在背景之上
+        bg.alpha_composite(overlay)
 
-    # 合并相邻帧匹配不佳的物体数修正（保底：至少渲染出所有 bbox）
+        # 边框直接画在合成后的图像上（无 alpha，清晰可见）
+        draw_final = ImageDraw.Draw(bg)
+        for obj_idx in range(min(len(bboxes), len(colors))):
+            x1, y1, x2, y2 = bboxes[obj_idx]
+            color = colors[obj_idx % len(colors)]
+            draw_final.rectangle([x1, y1, x2, y2], outline=color, width=line_width)
+
+        rendered.append(bg.convert("RGB"))
+
     return rendered
 
 
