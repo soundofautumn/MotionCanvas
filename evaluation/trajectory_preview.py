@@ -428,20 +428,14 @@ def render_from_bbox_mask(
             # 半透明填充（画在叠加层上）
             draw.rectangle([x1, y1, x2, y2], fill=fill_color, outline=None)
 
-        # === 橙色中心轨迹拖尾（也画在叠加层上） ===
-        if draw_trajectory and obj_centers:
-            tail_len = min(trail_length, t)
+        # === 橙色中心轨迹：起点→当前点 直线 ===
+        if draw_trajectory and obj_centers and t > 0:
             for oi in range(len(obj_centers)):
-                for dt in range(t - tail_len, t):
-                    if dt < 0:
-                        continue
-                    curr_pos = obj_centers[oi][dt]
-                    next_pos = obj_centers[oi][dt + 1]
-                    if curr_pos is None or next_pos is None:
-                        continue
-                    alpha = int(200 * (1 - (t - dt) / max(tail_len, 1)))
-                    line_color = trajectory_color + (alpha,)
-                    draw.line([curr_pos, next_pos], fill=line_color, width=line_width)
+                start_pos = obj_centers[oi][0]
+                curr_pos = obj_centers[oi][t]
+                if start_pos is None or curr_pos is None:
+                    continue
+                draw.line([start_pos, curr_pos], fill=trajectory_color + (200,), width=line_width)
 
         # 合成：叠加层在背景之上
         bg.alpha_composite(overlay)
