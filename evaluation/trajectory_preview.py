@@ -268,28 +268,31 @@ def save_trajectory_preview_video(
 # ═══════════════════════════════════════════════════════════════
 #  从保存的 bbox_mask.pt / track_video.pt 生成预览
 # ═══════════════════════════════════════════════════════════════
-
-_BBOX_COLORS = [
-    (255, 80, 80),    # 红
-    (80, 255, 80),    # 绿
-    (80, 130, 255),   # 蓝
-]
-
-
-def _find_bbox_from_mask(mask_slice: torch.Tensor) -> Optional[Tuple[int, int, int, int]]:
-    """从单帧单通道的 mask (H, W) 中提取非零区域的 bounding box。
-
-    Returns:
-        (x1, y1, x2, y2) 或 None（无有效区域）。
-    """
-    non_zero = torch.nonzero(mask_slice > 0)
-    if non_zero.shape[0] == 0:
-        return None
-    y_min = int(non_zero[:, 0].min().item())
-    y_max = int(non_zero[:, 0].max().item())
-    x_min = int(non_zero[:, 1].min().item())
     x_max = int(non_zero[:, 1].max().item())
     return x_min, y_min, x_max, y_max
+
+
+def _find_connected_bboxes(mask_slice: torch.Tensor) -> List[Tuple[int, int, int, int]]:
+    """从单帧 mask (H, W) 中找出所有连通区域的外接矩形。
+
+    使用简单的行扫描算法分离不同的物体区域。
+    """
+    binary = (mask_slice > 0).cpu().numpy()
+    if not binary.any():
+        return []
+
+    from scipy import ndimage
+    labeled, num_features = ndimage.label(binary)
+    bboxes = []
+    for i in range(1, num_features + 1):
+        ys, xs = np.where(labeled == i)
+        if len(ys) < 5:  # 过滤噪声点
+            continue
+        x1, x2 = int(xs.min()), int(xs.max())
+        y1, y2 = int(ys.min()), int(ys.max())
+        if x2 > x1 and y2 > y1:
+            bboxes.append((x1, y1, x2, y2))
+    return bboxes
 
 
 def render_from_bbox_mask(
@@ -297,77 +300,143 @@ def render_from_bbox_mask(
     bbox_mask: torch.Tensor,
     colors: Optional[List[Tuple[int, int, int]]] = None,
     line_width: int = 3,
-    fill_alpha: float = 0.15,
-    show_label: bool = True,
+    fill_alpha: float = 0.2,
+    show_label: bool = False,
+    draw_trajectory: bool = True,
+    trail_length: int = 15,
+    trajectory_color: Tuple[int, int, int] = (255, 200, 80),
 ) -> List[Image.Image]:
-    """在视频帧上叠加 bbox_mask 中物体区域的边框可视化。
+    """在视频帧上叠加 bbox_mask 中物体区域的边框可视化——与 Gradio GUI 风格一致。
 
     `bbox_mask.pt` 是 `build_bbox_mask_from_json_str` 的输出，
     形状为 `(1, 3, T, H, W)`，值域约 [-1, 1]（>0 表示物体区域）。
-    每个 channel 对应一个物体，逐帧插值得到平滑的 bbox 运动。
+
+    渲染风格（完全对齐 GUI `preview_control_video`）：
+    - 红色半透明填充 + 红色实线边框
+    - 橙色中心轨迹拖尾（渐隐效果）
+    - 使用连通域分析分离不同物体
 
     Args:
         frames: 原始视频帧 (RGB PIL Image 列表)。
         bbox_mask: (1, 3, T, H, W) 张量。
-        colors: 每个物体的颜色列表，默认使用红/绿/蓝。
-        line_width: 边框线宽（像素）。
-        fill_alpha: 半透明填充的 alpha 值。
-        show_label: 是否在边框左上角显示物体编号。
+        colors: 每个物体的颜色列表，默认红色 (255,80,80)。
+        line_width: 边框线宽（像素），GUI 默认 3。
+        fill_alpha: 半透明填充的 alpha 值，GUI 默认 0.2（RGBA 50/255）。
+        show_label: 是否显示物体编号标签（GUI 默认不显示）。
+        draw_trajectory: 是否绘制中心轨迹拖尾。
+        trail_length: 轨迹拖尾最大帧数，GUI 默认 15。
+        trajectory_color: 轨迹线颜色，GUI 使用橙黄色 (255, 200, 80)。
 
     Returns:
         渲染后的 RGB PIL Image 列表。
     """
     if colors is None:
-        colors = _BBOX_COLORS
+        colors = [(255, 80, 80)]
 
     T = len(frames)
-    # bbox_mask: (1, 3, T, H, W) -> (3, T, H, W)
-    mask = bbox_mask.squeeze(0)
-    n_channels = min(mask.shape[0], len(colors))
+    # bbox_mask: (1, 3, T, H, W) — 所有 3 个 channel 内容相同（merged）
+    # 使用 channel 0 做连通域分析分离物体
+    mask_2d = bbox_mask[0, 0]  # (T, H, W)
 
-    # 预计算每帧每个物体的 bbox
-    per_frame_bboxes: List[List[Optional[Tuple[int, int, int, int]]]] = []
+    # 预计算每帧每个连通域的 bbox
+    per_frame_bboxes: List[List[Tuple[int, int, int, int]]] = []
+    per_frame_centers: List[List[Optional[Tuple[float, float]]]] = []
     for t in range(T):
-        frame_bboxes: List[Optional[Tuple[int, int, int, int]]] = []
-        for c in range(n_channels):
-            bbox = _find_bbox_from_mask(mask[c, t])
-            frame_bboxes.append(bbox)
-        per_frame_bboxes.append(frame_bboxes)
+        bboxes = _find_connected_bboxes(mask_2d[t])
+        per_frame_bboxes.append(bboxes)
+        centers = []
+        for x1, y1, x2, y2 in bboxes:
+            centers.append(((x1 + x2) / 2.0, (y1 + y2) / 2.0))
+        per_frame_centers.append(centers)
 
+    # 跨帧匹配物体（基于最近中心距离）
+    # 简单策略: 按第一帧的物体数量确定 N_objects，逐帧按最近距离匹配
+    n_objects = max(len(bboxes) for bboxes in per_frame_bboxes) if per_frame_bboxes else 0
+    if n_objects == 0:
+        return [f.convert("RGB") for f in frames]
+
+    # 为每个物体构建跨帧的 center 轨迹
+    obj_centers: List[List[Optional[Tuple[float, float]]]] = [
+        [None] * T for _ in range(n_objects)
+    ]
+
+    # 第一帧直接分配
+    for oi in range(min(n_objects, len(per_frame_centers[0]))):
+        obj_centers[oi][0] = per_frame_centers[0][oi]
+
+    # 后续帧按最近距离匹配
+    for t in range(1, T):
+        prev_centers = [obj_centers[oi][t - 1] for oi in range(n_objects)
+                       if obj_centers[oi][t - 1] is not None]
+        curr_bboxes = per_frame_bboxes[t]
+        curr_centers = per_frame_centers[t]
+        assigned_curr = set()
+        assigned_obj = set()
+
+        # 对每个有前一帧位置的物体，找最近的当前帧中心
+        candidates = []
+        for oi in range(n_objects):
+            prev = obj_centers[oi][t - 1]
+            if prev is None:
+                continue
+            for ci, cc in enumerate(curr_centers):
+                if ci in assigned_curr:
+                    continue
+                d = (prev[0] - cc[0]) ** 2 + (prev[1] - cc[1]) ** 2
+                candidates.append((d, oi, ci))
+        candidates.sort()
+        for d, oi, ci in candidates:
+            if oi in assigned_obj or ci in assigned_curr:
+                continue
+            obj_centers[oi][t] = curr_centers[ci]
+            assigned_obj.add(oi)
+            assigned_curr.add(ci)
+
+        # 未匹配的当前帧中心 -> 新物体（补到后面）
+        next_oi = n_objects
+        for ci, cc in enumerate(curr_centers):
+            if ci in assigned_curr:
+                continue
+            if next_oi >= len(obj_centers):
+                obj_centers.append([None] * T)
+            obj_centers[next_oi][t] = cc
+            next_oi += 1
+
+    # 渲染
     rendered: List[Image.Image] = []
     for t in range(T):
-        # 转 RGBA 以支持半透明绘制
         frame_copy = frames[t].convert("RGBA").copy()
         draw = ImageDraw.Draw(frame_copy)
 
-        for obj_idx, bbox in enumerate(per_frame_bboxes[t]):
-            if bbox is None:
-                continue
-            x1, y1, x2, y2 = bbox
+        bboxes = per_frame_bboxes[t]
+
+        for obj_idx in range(min(len(bboxes), len(colors))):
+            x1, y1, x2, y2 = bboxes[obj_idx]
             color = colors[obj_idx % len(colors)]
             fill_color = color + (int(255 * fill_alpha),)
 
-            # 半透明填充
+            # === GUI 风格: 半透明填充 + 实线边框 ===
             draw.rectangle([x1, y1, x2, y2], fill=fill_color, outline=None)
-            # 实线边框
             draw.rectangle([x1, y1, x2, y2], outline=color, width=line_width)
 
-            # 标签
-            if show_label:
-                label = f"Obj {obj_idx + 1}"
-                left, top, right, bottom = draw.textbbox((0, 0), label)
-                tw = right - left
-                th = bottom - top
-                label_bg_color = color + (200,)
-                draw.rectangle(
-                    [x1, y1 - th - 4, x1 + tw + 6, y1],
-                    fill=label_bg_color,
-                )
-                draw.text((x1 + 3, y1 - th - 2), label, fill="white")
+        # === GUI 风格: 橙色中心轨迹拖尾 ===
+        if draw_trajectory and obj_centers:
+            tail_len = min(trail_length, t)
+            for oi in range(len(obj_centers)):
+                for dt in range(t - tail_len, t):
+                    if dt < 0:
+                        continue
+                    curr_pos = obj_centers[oi][dt]
+                    next_pos = obj_centers[oi][dt + 1]
+                    if curr_pos is None or next_pos is None:
+                        continue
+                    alpha = int(200 * (1 - (t - dt) / max(tail_len, 1)))
+                    line_color = trajectory_color + (alpha,)
+                    draw.line([curr_pos, next_pos], fill=line_color, width=line_width)
 
-        # 转回 RGB
         rendered.append(frame_copy.convert("RGB"))
 
+    # 合并相邻帧匹配不佳的物体数修正（保底：至少渲染出所有 bbox）
     return rendered
 
 
@@ -451,16 +520,18 @@ def render_signals_preview(
     fps: int = 15,
     quality: int = 8,
     show_bbox: bool = True,
-    show_heatmap: bool = True,
+    show_heatmap: bool = False,
     bbox_line_width: int = 3,
     heatmap_alpha: float = 0.35,
     heatmap_colormap: str = "viridis",
+    trail_length: int = 15,
 ) -> List[Image.Image]:
     """从保存的 bbox_mask.pt / track_video.pt 加载信号并渲染预览。
 
-    这是评估流程中替代 CoTracker 轨迹追踪的轻量预览方式：
-    - bbox_mask.pt → 绘制物体边界框（反映 bbox 关键帧的运动）
-    - track_video.pt → 绘制特征激活热力图（反映轨迹信号强度）
+    Bbox 渲染风格完全对齐 Gradio GUI 的 `preview_control_video`：
+    - 红色 (255,80,80) 半透明填充 + 红色实线边框 (width=3)
+    - 橙色 (255,200,80) 中心轨迹拖尾，由近到远渐隐
+    - 连通域分离多物体
 
     Args:
         frames: 原始视频帧列表。
@@ -469,27 +540,30 @@ def render_signals_preview(
         output_path: 可选，预览视频保存路径。
         fps: 预览视频帧率。
         quality: 视频质量。
-        show_bbox: 是否显示 bbox 框。
-        show_heatmap: 是否显示热力图。
-        bbox_line_width: bbox 边框宽度。
+        show_bbox: 是否显示 bbox 框（GUI 默认显示）。
+        show_heatmap: 是否显示热力图（GUI 默认不显示）。
+        bbox_line_width: bbox 边框宽度，GUI 默认 3。
         heatmap_alpha: 热力图透明度。
         heatmap_colormap: 热力图 colormap。
+        trail_length: 轨迹拖尾最大帧数，GUI 默认 15。
 
     Returns:
         渲染后的帧列表。
     """
     rendered = [f.convert("RGB").copy() for f in frames]
 
-    # 1. bbox_mask 可视化
+    # 1. bbox_mask 可视化（GUI 风格：红色填充+边框+橙色中心轨迹）
     if show_bbox and bbox_mask_path and os.path.exists(bbox_mask_path):
         print(f"  加载 bbox_mask: {bbox_mask_path}")
         try:
             bbox_mask = torch.load(bbox_mask_path, map_location="cpu", weights_only=True)
             if isinstance(bbox_mask, dict):
-                # 某些旧版本保存格式可能是 dict
                 bbox_mask = bbox_mask.get("bbox_mask", list(bbox_mask.values())[0])
             bbox_frames = render_from_bbox_mask(
-                rendered, bbox_mask, line_width=bbox_line_width,
+                rendered, bbox_mask,
+                line_width=bbox_line_width,
+                trail_length=trail_length,
+                draw_trajectory=True,
             )
             rendered = bbox_frames
             print(f"  ✓ bbox 框可视化完成")

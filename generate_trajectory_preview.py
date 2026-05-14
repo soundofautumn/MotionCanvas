@@ -102,9 +102,10 @@ def process_experiment(
         fps=fps,
         quality=quality,
         show_bbox=show_bbox,
-        show_heatmap=show_heatmap,
+        show_heatmap=False,
         bbox_line_width=bbox_line_width,
         heatmap_alpha=heatmap_alpha,
+        trail_length=15,
     )
     print(f"  Done: {output_path}")
     return True
