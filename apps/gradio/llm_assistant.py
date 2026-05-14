@@ -1142,6 +1142,64 @@ def _clamp01(v: float) -> float:
     return max(0.0, min(1.0, float(v)))
 
 
+def _check_bbox_clipping(
+    old_state: Dict[str, Any],
+    new_state: Dict[str, Any],
+    dx: float,
+    dy: float,
+    start_frame: int,
+    end_frame: int,
+) -> Optional[Dict[str, Any]]:
+    """Check if bbox translation caused clipping at image boundaries [0,1].
+    Returns a dict with clipped axes info, or None if no clipping occurred.
+    """
+    clipped_frames = []  # track which frames had clipping
+    hit_left = hit_right = hit_top = hit_bottom = False
+
+    for fi_str, new_bb in (new_state or {}).items():
+        try:
+            fi = int(fi_str)
+        except (ValueError, TypeError):
+            continue
+        if fi < start_frame or fi > end_frame:
+            continue
+        if not isinstance(new_bb, (list, tuple)) or len(new_bb) != 4:
+            continue
+
+        new_x1, new_y1, new_x2, new_y2 = [float(v) for v in new_bb]
+
+        # Only flag clipping at boundaries the movement was pushing toward
+        if dx < 0 and new_x1 <= 0.001:
+            hit_left = True
+        if dx > 0 and new_x2 >= 0.999:
+            hit_right = True
+        if dy < 0 and new_y1 <= 0.001:
+            hit_top = True
+        if dy > 0 and new_y2 >= 0.999:
+            hit_bottom = True
+
+    if not (hit_left or hit_right or hit_top or hit_bottom):
+        return None
+
+    parts = []
+    if hit_left:
+        parts.append("bbox hit left edge (x1=0), effective X displacement reduced")
+    if hit_right:
+        parts.append("bbox hit right edge (x2=1), effective X displacement reduced")
+    if hit_top:
+        parts.append("bbox hit top edge (y1=0), effective Y displacement reduced")
+    if hit_bottom:
+        parts.append("bbox hit bottom edge (y2=1), effective Y displacement reduced")
+
+    return {
+        "message": "; ".join(parts),
+        "clipped_left": hit_left,
+        "clipped_right": hit_right,
+        "clipped_top": hit_top,
+        "clipped_bottom": hit_bottom,
+    }
+
+
 def _interp_bbox_norm_for_frame(frames: Dict[str, Any], frame_idx: int):
     items = []
     for fi_str, bbox in (frames or {}).items():
@@ -2019,15 +2077,27 @@ def _apply_tool_calls(
             _add_result_for(call_id, name, {"ok": True, "applied": "camera_rotation_linear"})
         elif name == "bbox_translate":
             op = {"op": "bbox.translate", **args}
+            old_bbox_state = dict(bbox_state or {})
             bbox_state, point_state, camera_state = apply_ops_to_states(
                 [op], bbox_state, point_state, camera_state, num_frames, width, height, bbox_json_text=bbox_json_text, point_json_text=point_json_text, camera_json_text=camera_json_text
             )
-            msgs.append("bbox_translate")
-            _add_result_for(call_id, name, {
+            clipping = _check_bbox_clipping(
+                old_bbox_state, bbox_state,
+                dx=float(args.get("dx", 0)),
+                dy=float(args.get("dy", 0)),
+                start_frame=int(args.get("start_frame", 0)),
+                end_frame=int(args.get("end_frame", num_frames - 1)),
+            )
+            result = {
                 "ok": True,
                 "applied": "bbox_translate",
                 "bbox_json": _bbox_state_to_json(bbox_state),
-            })
+            }
+            if clipping:
+                result["warning"] = clipping["message"]
+                result["clipped"] = {k: clipping[k] for k in ("clipped_left", "clipped_right", "clipped_top", "clipped_bottom")}
+            msgs.append("bbox_translate")
+            _add_result_for(call_id, name, result)
         elif name == "bbox_set":
             op = {"op": "bbox.set", "frame": args.get("frame", 0), "bbox": args.get("bbox"), "space": args.get("space", "norm")}
             bbox_state, point_state, camera_state = apply_ops_to_states(
