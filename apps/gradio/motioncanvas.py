@@ -945,6 +945,20 @@ def preview_control_video(
 
     local_tracks = build_point_tracks_from_json(point_json_text, num_frames, height, width)
 
+    # Precompute background camera grid (used for grid point visualization)
+    bbox_mask_for_grid = None
+    if bbox_json_text and bbox_json_text.strip():
+        try:
+            bbox_mask_for_grid = build_bbox_mask_from_json_str(
+                bbox_json_text, num_frames, height, width
+            )
+        except Exception:
+            pass
+    background_tracks = generate_background_tracks(
+        camera_params, num_frames, height, width,
+        bbox_mask=bbox_mask_for_grid, grid_size=20,
+    )
+
     # Precompute bbox centers and trajectories for each object
     obj_trajectories = []
     for obj in bbox_data.get("objects", []):
@@ -1007,6 +1021,12 @@ def preview_control_video(
                     x, y = track[frame_idx]
                     tx, ty = apply_camera_transform_to_point(x, y, width, height, params["zoom"], params["pan_x"], params["pan_y"], params["rotation"])
                     draw.ellipse([tx - 5, ty - 5, tx + 5, ty + 5], fill=(80, 160, 255), outline=(255, 255, 255), width=2)
+
+        # Draw background camera grid as blue dots
+        for track in background_tracks:
+            if frame_idx < len(track):
+                gx, gy = track[frame_idx]
+                draw.ellipse([gx - 2, gy - 2, gx + 2, gy + 2], fill=(80, 160, 255))
 
         frames.append(img)
 
