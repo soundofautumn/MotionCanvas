@@ -1002,7 +1002,6 @@ def preview_control_video(
 
         # Draw user point trajectories as lines + dots
         if local_tracks is not None:
-            params = camera_params[frame_idx] if frame_idx < len(camera_params) else camera_params[0]
             for track in local_tracks:
                 # Draw trajectory tail
                 tail_len = min(15, frame_idx)
@@ -1011,15 +1010,19 @@ def preview_control_video(
                         continue
                     p1 = track[t]
                     p2 = track[t + 1]
-                    tp1 = apply_camera_transform_to_point(*p1, width, height, params["zoom"], params["pan_x"], params["pan_y"], params["rotation"])
-                    tp2 = apply_camera_transform_to_point(*p2, width, height, params["zoom"], params["pan_x"], params["pan_y"], params["rotation"])
+                    # 每段用各自帧的相机参数变换（而非当前帧）
+                    cp1 = camera_params[t] if t < len(camera_params) else camera_params[0]
+                    cp2 = camera_params[t + 1] if t + 1 < len(camera_params) else camera_params[0]
+                    tp1 = apply_camera_transform_to_point(*p1, width, height, cp1["zoom"], cp1["pan_x"], cp1["pan_y"], cp1["rotation"])
+                    tp2 = apply_camera_transform_to_point(*p2, width, height, cp2["zoom"], cp2["pan_x"], cp2["pan_y"], cp2["rotation"])
                     alpha = int(200 * (1 - (frame_idx - t) / max(tail_len, 1)))
                     draw.line([tp1, tp2], fill=(80, 160, 255, alpha), width=3)
 
-                # Current point
+                # Current point（使用当前帧的相机参数）
                 if frame_idx < len(track):
                     x, y = track[frame_idx]
-                    tx, ty = apply_camera_transform_to_point(x, y, width, height, params["zoom"], params["pan_x"], params["pan_y"], params["rotation"])
+                    cp = camera_params[frame_idx] if frame_idx < len(camera_params) else camera_params[0]
+                    tx, ty = apply_camera_transform_to_point(x, y, width, height, cp["zoom"], cp["pan_x"], cp["pan_y"], cp["rotation"])
                     draw.ellipse([tx - 5, ty - 5, tx + 5, ty + 5], fill=(80, 160, 255), outline=(255, 255, 255), width=2)
 
         # Draw background camera grid as blue dots
