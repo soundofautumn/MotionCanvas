@@ -7,6 +7,6 @@ from .trajectory_preview import (
     render_trajectory_preview,
     save_trajectory_preview_video,
     render_from_bbox_mask,
-    render_track_video_heatmap,
+    render_track_video_grid,
     render_signals_preview,
 )

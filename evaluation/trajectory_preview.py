@@ -268,8 +268,6 @@ def save_trajectory_preview_video(
 # ═══════════════════════════════════════════════════════════════
 #  从保存的 bbox_mask.pt / track_video.pt 生成预览
 # ═══════════════════════════════════════════════════════════════
-    x_max = int(non_zero[:, 1].max().item())
-    return x_min, y_min, x_max, y_max
 
 
 def _find_connected_bboxes(mask_slice: torch.Tensor) -> List[Tuple[int, int, int, int]]:
@@ -451,9 +449,83 @@ def render_from_bbox_mask(
     return rendered
 
 
-def render_track_video_heatmap(
+def render_track_video_grid(
     frames: List[Image.Image],
     track_video: torch.Tensor,
+    num_points: int = 200,
+    point_radius: int = 2,
+    color: Tuple[int, int, int] = (80, 160, 255),
+    min_activation: float = 0.1,
+) -> List[Image.Image]:
+    """将 track_video 特征图的激活强度渲染为离散轨迹点网格。
+
+    与 GUI `preview_control_video` 中的蓝色背景网格点效果一致：
+    从特征图中提取激活最强的 N 个点位置，绘制为彩色圆点。
+    如果包含相机运动，这些点会随镜头参数移动，形成"网格跟随相机"的视觉效果。
+
+    Args:
+        frames: 原始视频帧 (RGB PIL Image 列表)。
+        track_video: (1, C, T', H', W') 张量。
+        num_points: 每帧显示的轨迹点数量，GUI 网格约 200-400 个。
+        point_radius: 点半径（像素），GUI 使用 2px。
+        color: 点颜色，GUI 使用蓝色 (80, 160, 255)。
+        min_activation: 最小激活阈值，低于此值的点不显示。
+
+    Returns:
+        渲染后的 RGB PIL Image 列表。
+    """
+    import torch.nn.functional as F
+
+    T = len(frames)
+    H, W = frames[0].height, frames[0].width
+
+    # (1, C, T', H', W') -> 沿 channel 求 norm -> (T', H', W')
+    activation = track_video.squeeze(0).norm(dim=0)  # (T', H', W')
+    if activation.dtype != torch.float32:
+        activation = activation.to(torch.float32)
+
+    # 归一化到 [0, 1]
+    act_min = activation.min()
+    act_max = activation.max()
+    if act_max > act_min:
+        activation = (activation - act_min) / (act_max - act_min)
+    else:
+        return [f.convert("RGB") for f in frames]
+
+    # 上采样到原始分辨率
+    act_5d = activation.unsqueeze(0).unsqueeze(0)  # (1, 1, T', H', W')
+    act_5d = F.interpolate(
+        act_5d, size=(T, H, W), mode="trilinear", align_corners=False,
+    )
+    act_map = act_5d.squeeze().cpu().numpy()  # (T, H, W)
+
+    rendered: List[Image.Image] = []
+    for t in range(T):
+        frame = frames[t].convert("RGB").copy()
+        draw = ImageDraw.Draw(frame)
+
+        heat = act_map[t]  # (H, W)
+
+        # 找到激活最强的像素位置
+        flat = heat.flatten()
+        sorted_idx = np.argsort(flat)[::-1]
+        count = 0
+        for idx in sorted_idx:
+            if flat[idx] < min_activation:
+                break
+            if count >= num_points:
+                break
+            y, x = divmod(idx, W)
+            draw.ellipse(
+                [(x - point_radius, y - point_radius),
+                 (x + point_radius, y + point_radius)],
+                fill=color,
+            )
+            count += 1
+
+        rendered.append(frame)
+
+    return rendered
     alpha: float = 0.35,
     colormap: str = "viridis",
 ) -> List[Image.Image]:
@@ -543,6 +615,8 @@ def render_signals_preview(
     - 红色 (255,80,80) 半透明填充 + 红色实线边框 (width=3)
     - 橙色 (255,200,80) 中心轨迹拖尾，由近到远渐隐
     - 连通域分离多物体
+    - 蓝色 (80,160,255) 轨迹点网格从 track_video 特征图提取激活强度，
+      效果等同 GUI 的相机运动背景网格点
 
     Args:
         frames: 原始视频帧列表。
@@ -552,7 +626,7 @@ def render_signals_preview(
         fps: 预览视频帧率。
         quality: 视频质量。
         show_bbox: 是否显示 bbox 框（GUI 默认显示）。
-        show_heatmap: 是否显示热力图（GUI 默认不显示）。
+        show_heatmap: 是否显示轨迹点网格（GUI 默认显示背景网格）。
         bbox_line_width: bbox 边框宽度，GUI 默认 3。
         heatmap_alpha: 热力图透明度。
         heatmap_colormap: 热力图 colormap。
@@ -581,20 +655,20 @@ def render_signals_preview(
         except Exception as e:
             print(f"  [WARN] bbox_mask 可视化失败: {e}")
 
-    # 2. track_video 热力图
+    # 2. track_video 轨迹点网格（GUI 风格的蓝色网格点，反映相机运动）
     if show_heatmap and track_video_path and os.path.exists(track_video_path):
         print(f"  加载 track_video: {track_video_path}")
         try:
             track_video = torch.load(track_video_path, map_location="cpu", weights_only=True)
             if isinstance(track_video, dict):
                 track_video = track_video.get("track_video", list(track_video.values())[0])
-            heatmap_frames = render_track_video_heatmap(
-                rendered, track_video, alpha=heatmap_alpha, colormap=heatmap_colormap,
+            grid_frames = render_track_video_grid(
+                rendered, track_video, num_points=250, point_radius=2,
             )
-            rendered = heatmap_frames
-            print(f"  ✓ track_video 热力图完成")
+            rendered = grid_frames
+            print(f"  ✓ track_video 轨迹点网格完成")
         except Exception as e:
-            print(f"  [WARN] track_video 热力图失败: {e}")
+            print(f"  [WARN] track_video 轨迹点网格失败: {e}")
 
     # 3. 保存视频
     if output_path:
