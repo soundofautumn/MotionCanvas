@@ -31,7 +31,7 @@ from PIL import Image
 project_root = Path(__file__).resolve().parent
 sys.path.insert(0, str(project_root))
 
-from evaluation.trajectory_preview import render_signals_preview
+from evaluation.trajectory_preview import render_signals_preview, render_point_tracks_from_config
 
 
 def load_video_frames(video_path: str) -> list:
@@ -106,31 +106,32 @@ def process_experiment(
         heatmap_alpha=heatmap_alpha,
     )
 
-    # ── 第2步：运行 CoTracker 叠加点轨迹（起点→当前点直线 + 白色描边圆） ──
-    print(f"  Running CoTracker for point trajectories...")
-    try:
-        from evaluation.trajectory_preview import (
-            load_cotracker, compute_tracks, render_trajectory_preview,
-        )
-        cotracker = load_cotracker(device="cuda")
-        if cotracker is not None:
-            tracks, visibility = compute_tracks(cotracker, frames, device="cuda")
-            traj_frames = render_trajectory_preview(
-                rendered, tracks=tracks, visibility=visibility,
-                point_radius=3, line_width=2, subsample_tracks=3,
-            )
-            rendered = traj_frames
-            del cotracker
-            import torch
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-            print(f"  ✓ 点轨迹叠加完成")
-        else:
-            print(f"  [SKIP] CoTracker 不可用，跳过点轨迹")
-    except Exception as e:
-        print(f"  [WARN] 点轨迹叠加失败: {e}")
-        import traceback
-        traceback.print_exc()
+    # ── 第2步：从 config.json 读取原始点轨迹并渲染 ──
+    config_path = exp_dir / "config.json"
+    if config_path.exists():
+        try:
+            import json
+            cfg = json.loads(config_path.read_text())
+            point_json_str = json.dumps(cfg.get("point_json", {})) if cfg.get("point_json") else ""
+            camera_json_str = json.dumps(cfg.get("camera_json", "")) if cfg.get("camera_json") else ""
+            gen_params = cfg.get("gen_params", {})
+            h = int(gen_params.get("height", frames[0].height))
+            w = int(gen_params.get("width", frames[0].width))
+            nf = int(gen_params.get("num_frames", len(frames)))
+
+            if point_json_str and point_json_str.strip() and point_json_str != "{}":
+                print(f"  Rendering point trajectories from config.json...")
+                rendered = render_point_tracks_from_config(
+                    rendered, point_json_str, camera_json_str,
+                    num_frames=nf, height=h, width=w,
+                )
+                print(f"  ✓ 点轨迹渲染完成")
+        except Exception as e:
+            print(f"  [WARN] 点轨迹渲染失败: {e}")
+            import traceback
+            traceback.print_exc()
+    else:
+        print(f"  [SKIP] 无 config.json，跳过点轨迹")
 
     # ── 第3步：保存视频 ──
     print(f"  Saving video...")

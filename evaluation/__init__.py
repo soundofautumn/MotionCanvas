@@ -9,4 +9,5 @@ from .trajectory_preview import (
     render_from_bbox_mask,
     render_track_video_grid,
     render_signals_preview,
+    render_point_tracks_from_config,
 )

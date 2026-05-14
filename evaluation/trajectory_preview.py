@@ -19,6 +19,7 @@
 """
 
 import math
+import json as _json
 import os
 from typing import List, Optional, Tuple
 
@@ -607,5 +608,179 @@ def render_signals_preview(
     # 3. 保存视频
     if output_path:
         save_trajectory_preview_video(rendered, output_path, fps=fps, quality=quality)
+
+    return rendered
+
+
+def _build_point_tracks_from_json(json_str: str, num_frames: int, height: int, width: int) -> Optional[List]:
+    """从 point_json 构建插值后的逐帧轨迹（与 GUI 逻辑一致）。"""
+    if not json_str or not json_str.strip():
+        return None
+    data = _json.loads(json_str)
+    points = data.get("points", [])
+    if not points:
+        return None
+    tracks = []
+    for pt in points:
+        frames = pt.get("frames", {})
+        if not frames:
+            continue
+        keyframes = []
+        for fi_str, xy in frames.items():
+            fi = int(fi_str)
+            if fi >= num_frames:
+                continue
+            x, y = xy
+            if 0 <= x <= 1.0 and 0 <= y <= 1.0:
+                x = x * width
+                y = y * height
+            keyframes.append((fi, float(x), float(y)))
+        if not keyframes:
+            continue
+        keyframes = sorted(keyframes, key=lambda x: x[0])
+        per_frame = []
+        for f in range(num_frames):
+            if f <= keyframes[0][0]:
+                per_frame.append(keyframes[0][1:])
+                continue
+            if f >= keyframes[-1][0]:
+                per_frame.append(keyframes[-1][1:])
+                continue
+            for idx in range(len(keyframes) - 1):
+                f0, x0, y0 = keyframes[idx]
+                f1, x1, y1 = keyframes[idx + 1]
+                if f0 <= f <= f1:
+                    span = max(1, f1 - f0)
+                    t = (f - f0) / span
+                    per_frame.append((x0 + (x1 - x0) * t, y0 + (y1 - y0) * t))
+                    break
+        tracks.append(per_frame)
+    return tracks if tracks else None
+
+
+def _build_camera_params(json_str: str, num_frames: int) -> Optional[List[dict]]:
+    """从 camera_json 构建插值后的逐帧相机参数（与 GUI 逻辑一致）。"""
+    if not json_str or not json_str.strip():
+        return None
+    try:
+        data = _json.loads(json_str)
+        kfs = data.get("camera", {}).get("keyframes", [])
+    except Exception:
+        return None
+    if not kfs:
+        return None
+    kf_dict = {}
+    for kf in kfs:
+        fi = int(kf.get("frame", 0))
+        kf_dict[fi] = {
+            "zoom": float(kf.get("zoom", 1.0)),
+            "pan_x": float(kf.get("pan", [0, 0])[0]),
+            "pan_y": float(kf.get("pan", [0, 0])[1]),
+            "rotation": float(kf.get("rotation", 0)),
+        }
+    idxs = sorted(kf_dict.keys())
+    params = []
+    for fi in range(num_frames):
+        prev_idx = next_idx = idxs[0]
+        for idx in idxs:
+            if idx <= fi:
+                prev_idx = idx
+            if idx >= fi and (next_idx == idxs[0] or idx < next_idx):
+                next_idx = idx
+        if prev_idx == next_idx:
+            params.append(kf_dict[prev_idx])
+        else:
+            t = (fi - prev_idx) / max(1, next_idx - prev_idx)
+            p = kf_dict[prev_idx]
+            n = kf_dict[next_idx]
+            params.append({
+                "zoom": p["zoom"] * (1 - t) + n["zoom"] * t,
+                "pan_x": p["pan_x"] * (1 - t) + n["pan_x"] * t,
+                "pan_y": p["pan_y"] * (1 - t) + n["pan_y"] * t,
+                "rotation": p["rotation"] * (1 - t) + n["rotation"] * t,
+            })
+    return params
+
+
+def _apply_camera_to_point(x: float, y: float, width: int, height: int,
+                            zoom: float, pan_x: float, pan_y: float, rotation: float) -> Tuple[float, float]:
+    """对单个点应用相机变换（与 GUI 逻辑一致）。"""
+    cx, cy = width / 2.0, height / 2.0
+    dx = (x - cx) * zoom
+    dy = (y - cy) * zoom
+    theta = math.radians(rotation)
+    cos_t, sin_t = math.cos(theta), math.sin(theta)
+    rx = dx * cos_t - dy * sin_t
+    ry = dx * sin_t + dy * cos_t
+    return rx + cx + pan_x, ry + cy + pan_y
+
+
+def render_point_tracks_from_config(
+    frames: List[Image.Image],
+    point_json_str: str,
+    camera_json_str: str = "",
+    num_frames: int = 49,
+    height: int = 480,
+    width: int = 832,
+    line_width: int = 3,
+    point_color: Tuple[int, int, int] = (80, 160, 255),
+    outline_color: Tuple[int, int, int] = (255, 255, 255),
+) -> List[Image.Image]:
+    """从 config.json 的原始点轨迹数据渲染轨迹预览（与 GUI 效果一致）。
+
+    解析 point_json 中的点关键帧，插值得到逐帧位置，再应用相机变换，
+    绘制起点→当前点直线 + 白色描边圆。
+
+    Args:
+        frames: 视频帧列表。
+        point_json_str: point_json 字符串（含 points 数组）。
+        camera_json_str: camera_json 字符串（含 camera.keyframes）。
+        num_frames: 帧数。
+        height: 画面高度。
+        width: 画面宽度。
+        line_width: 轨迹线宽度。
+        point_color: 轨迹点填充颜色。
+        outline_color: 轨迹点描边颜色。
+
+    Returns:
+        渲染后的帧列表。
+    """
+    # 构建相机参数和点轨迹
+    camera_params = _build_camera_params(camera_json_str, num_frames)
+    local_tracks = _build_point_tracks_from_json(point_json_str, num_frames, height, width)
+
+    if not local_tracks:
+        return frames
+
+    rendered = [f.convert("RGB").copy() for f in frames]
+
+    for t in range(num_frames):
+        if t >= len(rendered):
+            break
+        draw = ImageDraw.Draw(rendered[t])
+
+        for track in local_tracks:
+            if len(track) < 2 or t < 1:
+                continue
+            start_p = track[0]
+            curr_p = track[min(t, len(track) - 1)]
+
+            cp_start = camera_params[0] if camera_params else None
+            cp_curr = camera_params[min(t, len(camera_params) - 1)] if camera_params else None
+
+            if cp_start and cp_curr:
+                sx, sy = _apply_camera_to_point(
+                    start_p[0], start_p[1], width, height,
+                    cp_start["zoom"], cp_start["pan_x"], cp_start["pan_y"], cp_start["rotation"],
+                )
+                cx, cy = _apply_camera_to_point(
+                    curr_p[0], curr_p[1], width, height,
+                    cp_curr["zoom"], cp_curr["pan_x"], cp_curr["pan_y"], cp_curr["rotation"],
+                )
+                draw.line([(sx, sy), (cx, cy)], fill=point_color, width=line_width)
+                draw.ellipse(
+                    [cx - 5, cy - 5, cx + 5, cy + 5],
+                    fill=point_color, outline=outline_color, width=2,
+                )
 
     return rendered
