@@ -92,13 +92,12 @@ def process_experiment(
     frames = load_video_frames(str(video_path))
     print(f"  Frames: {len(frames)}")
 
-    # 生成预览
-    print(f"  Generating preview...")
-    render_signals_preview(
+    # ── 第1步：从 .pt 文件生成 bbox 框 + 网格点 ──
+    print(f"  Generating bbox + grid overlay...")
+    rendered = render_signals_preview(
         frames,
         bbox_mask_path=str(bbox_pt) if bbox_pt.exists() else None,
         track_video_path=str(track_pt) if track_pt.exists() else None,
-        output_path=str(output_path),
         fps=fps,
         quality=quality,
         show_bbox=show_bbox,
@@ -106,6 +105,37 @@ def process_experiment(
         bbox_line_width=bbox_line_width,
         heatmap_alpha=heatmap_alpha,
     )
+
+    # ── 第2步：运行 CoTracker 叠加点轨迹（起点→当前点直线 + 白色描边圆） ──
+    print(f"  Running CoTracker for point trajectories...")
+    try:
+        from evaluation.trajectory_preview import (
+            load_cotracker, compute_tracks, render_trajectory_preview,
+        )
+        cotracker = load_cotracker(device="cuda")
+        if cotracker is not None:
+            tracks, visibility = compute_tracks(cotracker, frames, device="cuda")
+            traj_frames = render_trajectory_preview(
+                rendered, tracks=tracks, visibility=visibility,
+                point_radius=3, line_width=2, subsample_tracks=3,
+            )
+            rendered = traj_frames
+            del cotracker
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            print(f"  ✓ 点轨迹叠加完成")
+        else:
+            print(f"  [SKIP] CoTracker 不可用，跳过点轨迹")
+    except Exception as e:
+        print(f"  [WARN] 点轨迹叠加失败: {e}")
+        import traceback
+        traceback.print_exc()
+
+    # ── 第3步：保存视频 ──
+    print(f"  Saving video...")
+    from evaluation.trajectory_preview import save_trajectory_preview_video
+    save_trajectory_preview_video(rendered, str(output_path), fps=fps, quality=quality)
     print(f"  Done: {output_path}")
     return True
 
