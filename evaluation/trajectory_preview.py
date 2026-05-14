@@ -159,12 +159,14 @@ def render_trajectory_preview(
     在视频帧上渲染轨迹预览。
 
     如果未提供 tracks/visibility，会自动加载 CoTracker 并计算。
+    每个追踪点的轨迹从起点（第一帧可见位置）到当前位置绘制一条直线，
+    并在当前位置画一个带白色描边的圆点。
 
     Args:
         frames: 原始视频帧 (RGB PIL Image 列表)。
         tracks: 可选，预计算轨迹 (T, N, 2) 像素坐标。
         visibility: 可选，预计算可见性 (T, N) bool。
-        trail_length: 轨迹拖尾长度（帧数）。
+        trail_length: 保留（仅用于向后兼容）。
         point_radius: 点半径（像素）。
         line_width: 轨迹线宽度（像素）。
         subsample_tracks: 轨迹点下采样（1=全部，2=每隔一个取一个...）。
@@ -197,37 +199,44 @@ def render_trajectory_preview(
     # ---- 生成颜色 ----
     colors = _generate_colors(N)
 
+    # ---- 预计算每根轨迹的起点（第一个可见帧的位置） ----
+    start_positions = []
+    for n in range(N):
+        start_idx = None
+        for t in range(T):
+            if visibility[t, n]:
+                start_idx = t
+                break
+        if start_idx is not None:
+            start_positions.append(tracks[start_idx, n])
+        else:
+            start_positions.append(None)
+
     # ---- 渲染每一帧 ----
     rendered: List[Image.Image] = []
     for t in range(T):
         frame = frames[t].convert("RGB")
         draw = ImageDraw.Draw(frame)
 
-        start_t = max(0, t - trail_length + 1)
-
         for n in range(N):
             if not visibility[t, n]:
                 continue
             color = colors[n % len(colors)]
 
-            # 绘制轨迹线 (从 start_t 到 t)
-            for pt in range(start_t, t):
-                if visibility[pt, n] and visibility[pt + 1, n]:
-                    x1, y1 = float(tracks[pt, n, 0]), float(tracks[pt, n, 1])
-                    x2, y2 = float(tracks[pt + 1, n, 0]), float(tracks[pt + 1, n, 1])
-                    if all(v >= 0 for v in [x1, y1, x2, y2]):
-                        # 越老的轨迹线越淡
-                        alpha = 0.3 + 0.7 * (pt - start_t) / max(t - start_t, 1)
-                        faded_color = tuple(int(c * alpha) for c in color)
-                        draw.line([(x1, y1), (x2, y2)], fill=faded_color, width=line_width)
+            # 起点 → 当前点 直线
+            start_pos = start_positions[n]
+            curr_x, curr_y = float(tracks[t, n, 0]), float(tracks[t, n, 1])
+            if start_pos is not None and curr_x >= 0 and curr_y >= 0:
+                sx, sy = float(start_pos[0]), float(start_pos[1])
+                if sx >= 0 and sy >= 0:
+                    draw.line([(sx, sy), (curr_x, curr_y)], fill=color, width=line_width)
 
-            # 绘制当前帧的点
-            x, y = float(tracks[t, n, 0]), float(tracks[t, n, 1])
-            if x >= 0 and y >= 0:
+            # 绘制当前帧的点（带白色描边）
+            if curr_x >= 0 and curr_y >= 0:
                 draw.ellipse(
                     [
-                        (x - point_radius, y - point_radius),
-                        (x + point_radius, y + point_radius),
+                        (curr_x - point_radius, curr_y - point_radius),
+                        (curr_x + point_radius, curr_y + point_radius),
                     ],
                     fill=color,
                     outline="white",
