@@ -400,6 +400,10 @@ def render_track_video_heatmap(
     # (1, C, T', H', W') -> 沿 channel 求 norm -> (T', H', W')
     activation = track_video.squeeze(0).norm(dim=0)  # (T', H', W')
 
+    # 确保 float32（bfloat16 不支持 CPU interpolate）
+    if activation.dtype != torch.float32:
+        activation = activation.to(torch.float32)
+
     # 归一化到 [0, 1]
     act_min = activation.min()
     act_max = activation.max()
