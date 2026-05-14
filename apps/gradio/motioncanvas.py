@@ -959,20 +959,6 @@ def preview_control_video(
         bbox_mask=bbox_mask_for_grid, grid_size=20,
     )
 
-    # Precompute bbox centers and trajectories for each object
-    obj_trajectories = []
-    for obj in bbox_data.get("objects", []):
-        obj_frames = obj.get("frames", {})
-        centers = []
-        for f in range(num_frames):
-            bbox = _interp_bbox_for_frame(obj_frames, f, width, height)
-            if bbox is None:
-                centers.append(None)
-            else:
-                x1, y1, x2, y2 = bbox
-                centers.append(((x1 + x2) / 2.0, (y1 + y2) / 2.0))
-        obj_trajectories.append(centers)
-
     frames = []
     for frame_idx in range(num_frames):
         img = base_frame.copy()
@@ -988,17 +974,6 @@ def preview_control_video(
             fill_color = (255, 80, 80, 50)
             outline_color = (255, 80, 80)
             draw.rectangle([x1, y1, x2, y2], fill=fill_color, outline=outline_color, width=3)
-
-            # Draw trajectory tail (last N frames of bbox center)
-            if obj_idx < len(obj_trajectories):
-                traj = obj_trajectories[obj_idx]
-                tail_len = min(15, frame_idx)
-                for t in range(frame_idx - tail_len, frame_idx):
-                    if t < 0 or traj[t] is None or traj[t + 1] is None:
-                        continue
-                    alpha = int(200 * (1 - (frame_idx - t) / max(tail_len, 1)))
-                    line_color = (255, 200, 80, alpha)
-                    draw.line([traj[t], traj[t + 1]], fill=line_color, width=3)
 
         # Draw user point trajectories as straight lines from start to current
         if local_tracks is not None:

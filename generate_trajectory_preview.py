@@ -105,7 +105,6 @@ def process_experiment(
         show_heatmap=True,
         bbox_line_width=bbox_line_width,
         heatmap_alpha=heatmap_alpha,
-        trail_length=15,
     )
     print(f"  Done: {output_path}")
     return True

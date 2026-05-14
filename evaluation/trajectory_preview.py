@@ -239,8 +239,8 @@ def render_trajectory_preview(
                         (curr_x + point_radius, curr_y + point_radius),
                     ],
                     fill=color,
-                    outline="white",
-                    width=1,
+                    outline=(255, 255, 255),
+                    width=2,
                 )
 
         rendered.append(frame)
@@ -309,9 +309,6 @@ def render_from_bbox_mask(
     line_width: int = 3,
     fill_alpha: float = 0.2,
     show_label: bool = False,
-    draw_trajectory: bool = True,
-    trail_length: int = 15,
-    trajectory_color: Tuple[int, int, int] = (255, 200, 80),
 ) -> List[Image.Image]:
     """在视频帧上叠加 bbox_mask 中物体区域的边框可视化——与 Gradio GUI 风格一致。
 
@@ -427,15 +424,6 @@ def render_from_bbox_mask(
 
             # 半透明填充（画在叠加层上）
             draw.rectangle([x1, y1, x2, y2], fill=fill_color, outline=None)
-
-        # === 橙色中心轨迹：起点→当前点 直线 ===
-        if draw_trajectory and obj_centers and t > 0:
-            for oi in range(len(obj_centers)):
-                start_pos = obj_centers[oi][0]
-                curr_pos = obj_centers[oi][t]
-                if start_pos is None or curr_pos is None:
-                    continue
-                draw.line([start_pos, curr_pos], fill=trajectory_color + (200,), width=line_width)
 
         # 合成：叠加层在背景之上
         bg.alpha_composite(overlay)
@@ -555,13 +543,11 @@ def render_signals_preview(
     bbox_line_width: int = 3,
     heatmap_alpha: float = 0.35,
     heatmap_colormap: str = "viridis",
-    trail_length: int = 15,
 ) -> List[Image.Image]:
     """从保存的 bbox_mask.pt / track_video.pt 加载信号并渲染预览。
 
     Bbox 渲染风格完全对齐 Gradio GUI 的 `preview_control_video`：
     - 红色 (255,80,80) 半透明填充 + 红色实线边框 (width=3)
-    - 橙色 (255,200,80) 中心轨迹拖尾，由近到远渐隐
     - 连通域分离多物体
     - 蓝色 (80,160,255) 轨迹点网格从 track_video 特征图提取激活强度，
       效果等同 GUI 的相机运动背景网格点
@@ -578,7 +564,6 @@ def render_signals_preview(
         bbox_line_width: bbox 边框宽度，GUI 默认 3。
         heatmap_alpha: 热力图透明度。
         heatmap_colormap: 热力图 colormap。
-        trail_length: 轨迹拖尾最大帧数，GUI 默认 15。
 
     Returns:
         渲染后的帧列表。
@@ -595,8 +580,6 @@ def render_signals_preview(
             bbox_frames = render_from_bbox_mask(
                 rendered, bbox_mask,
                 line_width=bbox_line_width,
-                trail_length=trail_length,
-                draw_trajectory=True,
             )
             rendered = bbox_frames
             print(f"  ✓ bbox 框可视化完成")
