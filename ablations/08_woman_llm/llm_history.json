@@ -5,6 +5,6 @@
   },
   {
     "role": "assistant",
-    "content": "已完成所有配置！现在可以生成视频了。\n\n**设置总结：**\n\n1. **Prompt**: \"A woman with sunglasses and a camera turns her head to the right, looking away from camera, natural head movement, outdoor cruise ship background, sunny day, cinematic lighting, high quality video\"\n\n2. **相机运动**: 从第0帧到第48帧，zoom 从 1.0 缓慢放大到 1.5（聚焦到脸部）\n\n3. **物体运动（转头）**: \n   - 头部 bbox 从 `[0.347, 0.249, 0.647, 0.473]` 向右平移到 `[0.587, 0.249, 0.887, 0.473]`\n   - 面部中心点从 `[0.524, 0.344]` 向右移动到 `[0.764, 0.344]`\n\n4. **生成参数**: 49帧，15fps，480x832分辨率\n\n视频将展示：女人戴着墨镜拿着相机，慢慢将头转向右侧，同时相机逐渐放大到她的脸部。"
+    "content": "已完成所有配置！以下是设置总结：\n\n**相机运动**：\n- 从 zoom=1.0 缓慢放大到 zoom=1.35（约35%放大），聚焦到女人脸部\n\n**物体运动**：\n- 脸部 bbox 从 `[0.346, 0.247, 0.648, 0.472]` 向右平移到 `[0.586, 0.247, 0.888, 0.472]`\n- 脸部中心点轨迹从 `[0.524, 0.344]` 向右移动到 `[0.764, 0.344]`\n\n**生成参数**：\n- Prompt: \"A woman with sunglasses turns her head to the right, looking away, standing in front of a cruise ship, sunny day, blue sky, cinematic lighting, smooth motion, high quality\"\n\n现在可以生成视频了，效果将是：女人慢慢转头向右看，同时相机缓慢放大聚焦到她的脸部。"
   }
 ]

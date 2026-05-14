@@ -1,42 +1,47 @@
 {
   "experiment": "05_cat_llm",
-  "timestamp": "2026-05-12T05:53:38+00:00",
+  "timestamp": "2026-05-14T07:00:51+00:00",
   "image": "data/input_img/cat.png",
   "instruction": "a cat is walking. Camera stays still.",
-  "prompt": "A cat walking on a soft pink cushion, realistic fur texture, gray and white tabby cat, indoor natural lighting, smooth movement, high quality",
+  "prompt": "A tabby cat walking from left to right, smooth movement, detailed fur, natural lighting, high quality video",
   "seed": 42,
   "mode": "llm",
   "llm": {
     "instruction": "a cat is walking. Camera stays still.",
     "model": "Pro/moonshotai/Kimi-K2.5",
-    "duration_sec": 36.34,
+    "duration_sec": 37.81,
     "status": "✅ 已应用 LLM 更新",
     "tool_rounds": [
       {
         "round": 0,
         "calls": [
-          "gdino_detect_bbox",
-          "gdino_sam_detect_point"
+          "gdino_detect_bbox"
         ]
       },
       {
         "round": 1,
         "calls": [
-          "bbox_translate",
-          "points_translate",
+          "gdino_sam_detect_point",
           "set_generation_params"
+        ]
+      },
+      {
+        "round": 2,
+        "calls": [
+          "bbox_translate",
+          "points_translate"
         ]
       }
     ],
     "error": null
   },
   "signal_building": {
-    "duration_sec": 0.54,
+    "duration_sec": 0.59,
     "has_bbox_mask": true,
     "has_track_video": true
   },
   "generation": {
-    "duration_sec": 508.17,
+    "duration_sec": 513.23,
     "num_frames": 49,
     "num_inference_steps": 50,
     "width": 832,
@@ -47,6 +52,6 @@
     "fps": 15,
     "success": true
   },
-  "total_duration_sec": 546.22,
+  "total_duration_sec": 553.02,
   "error": null
 }

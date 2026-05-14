@@ -5,6 +5,6 @@
   },
   {
     "role": "assistant",
-    "content": "已完成设置！以下是配置摘要：\n\n**运动设计：**\n- **0-12帧**：猫保持静止，向左看（look left）\n- **12-48帧**：猫从画面中心向右行走，最终到达右侧边缘\n\n**相机**：保持静态（无 camera 运动）\n\n**Prompt**：已更新为描述猫在花园中先向左看，然后向右行走的场景\n\n现在可以生成视频了。"
+    "content": "已完成所有设置：\n\n1. **物体定位**：检测到猫的 bbox 和头部关键点\n2. **运动轨迹**：猫从画面中心向右移动（dx=0.2，线性过渡），从第 0 帧到第 48 帧\n3. **相机**：保持静止（无 camera 运动）\n4. **Prompt**：\"A tabby cat sitting on a stone, first looking to the left, then standing up and walking to the right, garden background with green plants, natural lighting, smooth motion\"\n\n现在可以生成视频了，猫会先向左看，然后从中心位置走向右侧。"
   }
 ]

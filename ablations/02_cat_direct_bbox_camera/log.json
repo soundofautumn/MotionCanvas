@@ -1,6 +1,6 @@
 {
   "experiment": "02_cat_direct_bbox_camera",
-  "timestamp": "2026-05-11T09:24:14+00:00",
+  "timestamp": "2026-05-14T06:35:06+00:00",
   "image": "data/input_img/cat.png",
   "instruction": "",
   "prompt": "",
@@ -8,12 +8,12 @@
   "mode": "direct",
   "llm": null,
   "signal_building": {
-    "duration_sec": 0.39,
+    "duration_sec": 0.52,
     "has_bbox_mask": true,
     "has_track_video": true
   },
   "generation": {
-    "duration_sec": 510.22,
+    "duration_sec": 512.91,
     "num_frames": 49,
     "num_inference_steps": 50,
     "width": 832,
@@ -24,6 +24,6 @@
     "fps": 15,
     "success": true
   },
-  "total_duration_sec": 511.77,
+  "total_duration_sec": 514.65,
   "error": null
 }

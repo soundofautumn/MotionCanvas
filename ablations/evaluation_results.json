@@ -1,72 +1,75 @@
 {
-  "generated_at": "2026-05-13T05:58:27+00:00",
+  "generated_at": "2026-05-14T08:17:24+00:00",
   "device": "cuda",
   "models": "all",
   "sample_n": 8,
   "has_reference": false,
+  "has_trajectory_preview": false,
+  "trail_length": 8,
+  "subsample_tracks": 3,
   "results": [
     {
       "experiment": "05_cat_llm",
-      "prompt": "A cat walking on a soft pink cushion, realistic fur texture, gray and white tabby cat, indoor natural lighting, smooth movement, high quality",
+      "prompt": "A tabby cat walking from left to right, smooth movement, detailed fur, natural lighting, high quality video",
       "seed": 42,
       "mode": "llm",
       "image": "data/input_img/cat.png",
       "quality": {
-        "ImageReward": -0.685404,
-        "Aesthetic": 4.65222,
-        "PickScore": 0.20361,
-        "CLIP": 0.283381,
-        "HPSv2": 0.244748,
-        "HPSv2.1": 0.187654,
-        "MPS": 15.403524
+        "ImageReward": -1.990156,
+        "Aesthetic": 4.546748,
+        "PickScore": 0.195258,
+        "CLIP": 0.248058,
+        "HPSv2": 0.25459,
+        "HPSv2.1": 0.187958,
+        "MPS": 7.201719
       }
     },
     {
       "experiment": "06_cat2_llm",
-      "prompt": "A tabby cat sitting on a stone in a garden, looking to the left, then standing up and walking to the right, natural movement, detailed fur, outdoor scene with green plants and trees, cinematic lighting, high quality",
+      "prompt": "A tabby cat sitting on a stone, first looking to the left, then standing up and walking to the right, garden background with green plants, natural lighting, smooth motion",
       "seed": 42,
       "mode": "llm",
       "image": "data/input_img/cat2.png",
       "quality": {
-        "ImageReward": 1.066565,
-        "Aesthetic": 5.129297,
-        "PickScore": 0.205451,
-        "CLIP": 0.327832,
-        "HPSv2": 0.255306,
-        "HPSv2.1": 0.190341,
-        "MPS": 12.700533
+        "ImageReward": 1.122234,
+        "Aesthetic": 5.042056,
+        "PickScore": 0.204465,
+        "CLIP": 0.30892,
+        "HPSv2": 0.253389,
+        "HPSv2.1": 0.193351,
+        "MPS": 8.305056
       }
     },
     {
       "experiment": "07_bear_llm",
-      "prompt": "A brown bear walking from left to right across a forest meadow near a lake, natural lighting, cinematic, high quality",
+      "prompt": "A brown bear walking from left to right in a forest near a lake, natural lighting, cinematic, high quality",
       "seed": 42,
       "mode": "llm",
       "image": "data/input_img/bear.jpg",
       "quality": {
-        "ImageReward": 1.211311,
-        "Aesthetic": 5.779549,
-        "PickScore": 0.210147,
-        "CLIP": 0.333096,
-        "HPSv2": 0.245546,
-        "HPSv2.1": 0.164067,
-        "MPS": 9.095077
+        "ImageReward": 0.921339,
+        "Aesthetic": 5.339455,
+        "PickScore": 0.201693,
+        "CLIP": 0.343409,
+        "HPSv2": 0.244697,
+        "HPSv2.1": 0.168308,
+        "MPS": 8.344519
       }
     },
     {
       "experiment": "08_woman_llm",
-      "prompt": "A woman with sunglasses and a camera turns her head to the right, looking away from camera, natural head movement, outdoor cruise ship background, sunny day, cinematic lighting, high quality video",
+      "prompt": "A woman with sunglasses turns her head to the right, looking away, standing in front of a cruise ship, sunny day, blue sky, cinematic lighting, smooth motion, high quality",
       "seed": 42,
       "mode": "llm",
       "image": "data/input_img/woman.png",
       "quality": {
-        "ImageReward": 1.303846,
-        "Aesthetic": 5.227041,
-        "PickScore": 0.188659,
-        "CLIP": 0.374167,
-        "HPSv2": 0.235765,
-        "HPSv2.1": 0.204545,
-        "MPS": 8.557788
+        "ImageReward": 0.526666,
+        "Aesthetic": 5.232248,
+        "PickScore": 0.189398,
+        "CLIP": 0.357364,
+        "HPSv2": 0.230202,
+        "HPSv2.1": 0.182998,
+        "MPS": 8.149093
       }
     }
   ]

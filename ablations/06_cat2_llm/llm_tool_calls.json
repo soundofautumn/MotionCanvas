@@ -40,10 +40,8 @@
         "id": "functions.gdino_sam_detect_point:1",
         "name": "gdino_sam_detect_point",
         "arguments": {
-          "query": "a cat",
-          "point_method": "centroid",
-          "box_threshold": 0.3,
-          "text_threshold": 0.25
+          "query": "cat head",
+          "point_method": "centroid"
         }
       }
     ],
@@ -54,27 +52,27 @@
           "ok": true,
           "found": true,
           "frame": 0,
-          "query": "a cat",
+          "query": "cat head",
           "point_method": "centroid",
           "sam_used": true,
-          "score": 0.823523759841919,
+          "score": 0.6081982254981995,
           "bbox_norm": [
-            0.4778,
-            0.3035,
-            0.7808,
-            0.9814
+            0.48,
+            0.3055,
+            0.781,
+            0.50833
           ],
           "point_norm": [
-            0.584,
-            0.6746
+            0.6527,
+            0.4294
           ],
           "point_json": {
             "points": [
               {
                 "frames": {
                   "0": [
-                    0.584,
-                    0.6746
+                    0.6527,
+                    0.4294
                   ]
                 }
               }
@@ -92,9 +90,9 @@
         "id": "functions.bbox_translate:2",
         "name": "bbox_translate",
         "arguments": {
-          "start_frame": 12,
+          "start_frame": 0,
           "end_frame": 48,
-          "dx": 0.25,
+          "dx": 0.2,
           "dy": 0,
           "space": "norm",
           "transition": "linear"
@@ -104,9 +102,9 @@
         "id": "functions.points_translate:3",
         "name": "points_translate",
         "arguments": {
-          "start_frame": 12,
+          "start_frame": 0,
           "end_frame": 48,
-          "dx": 0.25,
+          "dx": 0.2,
           "dy": 0,
           "space": "norm",
           "transition": "linear"
@@ -116,7 +114,7 @@
         "id": "functions.set_generation_params:4",
         "name": "set_generation_params",
         "arguments": {
-          "prompt": "A tabby cat sitting on a stone in a garden, looking to the left, then standing up and walking to the right, natural movement, detailed fur, outdoor scene with green plants and trees, cinematic lighting, high quality"
+          "prompt": "A tabby cat sitting on a stone, first looking to the left, then standing up and walking to the right, garden background with green plants, natural lighting, smooth motion"
         }
       }
     ],
@@ -136,14 +134,8 @@
                     0.7808,
                     0.9814
                   ],
-                  "12": [
-                    0.4778,
-                    0.3035,
-                    0.7808,
-                    0.9814
-                  ],
                   "48": [
-                    0.9778,
+                    0.8778,
                     0.3035,
                     1.0,
                     0.9814
@@ -164,7 +156,6 @@
           ],
           "point_frames_after": [
             0,
-            12,
             48
           ],
           "point_json": {
@@ -172,20 +163,12 @@
               {
                 "frames": {
                   "0": [
-                    0.584,
-                    0.6746
+                    0.6527,
+                    0.4294
                   ],
-                  "12": [
-                    0.584,
-                    0.6746
-                  ]
-                }
-              },
-              {
-                "frames": {
                   "48": [
                     1.0,
-                    0.6746
+                    0.4294
                   ]
                 }
               }
@@ -215,14 +198,8 @@
               0.7808,
               0.9814
             ],
-            "12": [
-              0.4778,
-              0.3035,
-              0.7808,
-              0.9814
-            ],
             "48": [
-              0.9778,
+              0.8778,
               0.3035,
               1.0,
               0.9814
@@ -237,26 +214,18 @@
         {
           "frames": {
             "0": [
-              0.584,
-              0.6746
+              0.6527,
+              0.4294
             ],
-            "12": [
-              0.584,
-              0.6746
-            ]
-          }
-        },
-        {
-          "frames": {
             "48": [
               1.0,
-              0.6746
+              0.4294
             ]
           }
         }
       ]
     },
-    "prompt": "A tabby cat sitting on a stone in a garden, looking to the left, then standing up and walking to the right, natural movement, detailed fur, outdoor scene with green plants and trees, cinematic lighting, high quality",
+    "prompt": "A tabby cat sitting on a stone, first looking to the left, then standing up and walking to the right, garden background with green plants, natural lighting, smooth motion",
     "gen_params": {
       "height": 480,
       "width": 832,

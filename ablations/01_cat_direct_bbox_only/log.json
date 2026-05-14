@@ -1,6 +1,6 @@
 {
   "experiment": "01_cat_direct_bbox_only",
-  "timestamp": "2026-05-11T09:15:44+00:00",
+  "timestamp": "2026-05-14T06:26:34+00:00",
   "image": "data/input_img/cat.png",
   "instruction": "",
   "prompt": "",
@@ -8,12 +8,12 @@
   "mode": "direct",
   "llm": null,
   "signal_building": {
-    "duration_sec": 0.43,
+    "duration_sec": 0.53,
     "has_bbox_mask": true,
     "has_track_video": true
   },
   "generation": {
-    "duration_sec": 508.48,
+    "duration_sec": 510.69,
     "num_frames": 49,
     "num_inference_steps": 50,
     "width": 832,
@@ -24,6 +24,6 @@
     "fps": 15,
     "success": true
   },
-  "total_duration_sec": 510.08,
+  "total_duration_sec": 512.44,
   "error": null
 }

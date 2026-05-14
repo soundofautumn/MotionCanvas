@@ -1,16 +1,16 @@
 {
   "experiment": "08_woman_llm",
-  "prompt": "A woman with sunglasses and a camera turns her head to the right, looking away from camera, natural head movement, outdoor cruise ship background, sunny day, cinematic lighting, high quality video",
+  "prompt": "A woman with sunglasses turns her head to the right, looking away, standing in front of a cruise ship, sunny day, blue sky, cinematic lighting, smooth motion, high quality",
   "seed": 42,
   "mode": "llm",
   "image": "data/input_img/woman.png",
   "quality": {
-    "ImageReward": 1.303846,
-    "Aesthetic": 5.227041,
-    "PickScore": 0.188659,
-    "CLIP": 0.374167,
-    "HPSv2": 0.235765,
-    "HPSv2.1": 0.204545,
-    "MPS": 8.557788
+    "ImageReward": 0.526666,
+    "Aesthetic": 5.232248,
+    "PickScore": 0.189398,
+    "CLIP": 0.357364,
+    "HPSv2": 0.230202,
+    "HPSv2.1": 0.182998,
+    "MPS": 8.149093
   }
 }

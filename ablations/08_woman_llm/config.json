@@ -1,5 +1,5 @@
 {
-  "prompt": "A woman with sunglasses and a camera turns her head to the right, looking away from camera, natural head movement, outdoor cruise ship background, sunny day, cinematic lighting, high quality video",
+  "prompt": "A woman with sunglasses turns her head to the right, looking away, standing in front of a cruise ship, sunny day, blue sky, cinematic lighting, smooth motion, high quality",
   "has_bbox": true,
   "has_camera": true,
   "has_point": true,
@@ -8,16 +8,16 @@
       {
         "frames": {
           "0": [
-            0.3471,
-            0.2487,
-            0.6468,
-            0.47265
+            0.3464,
+            0.2471,
+            0.6483,
+            0.47192
           ],
           "48": [
-            0.5871,
-            0.2487,
-            0.8868,
-            0.4727
+            0.5864,
+            0.2471,
+            0.8883,
+            0.4719
           ]
         }
       }
@@ -37,7 +37,7 @@
         },
         {
           "frame": 48,
-          "zoom": 1.5,
+          "zoom": 1.35,
           "pan": [
             0.0,
             0.0
@@ -54,11 +54,7 @@
           "0": [
             0.5236,
             0.3437
-          ]
-        }
-      },
-      {
-        "frames": {
+          ],
           "48": [
             0.7636,
             0.3437

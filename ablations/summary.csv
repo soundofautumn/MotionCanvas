@@ -1,5 +1,9 @@
 experiment,mode,image,prompt,seed,llm_duration,llm_tool_calls,llm_status,signal_duration,gen_duration,gen_success,total_duration
-05_cat_llm,llm,data/input_img/cat.png,"A cat walking on a soft pink cushion, realistic fur texture, gray and white tabby cat, indoor natural lighting, smooth movement, high quality",42,36.34,0,✅ 已应用 LLM 更新,0.54,508.17,True,546.22
-06_cat2_llm,llm,data/input_img/cat2.png,"A tabby cat sitting on a stone in a garden, looking to the left, then standing up and walking to the right, natural movement, detailed fur, outdoor scene with green plants and trees, cinematic lighting, high quality",42,33.88,0,✅ 已应用 LLM 更新,0.47,510.35,True,545.6
-07_bear_llm,llm,data/input_img/bear.jpg,"A brown bear walking from left to right across a forest meadow near a lake, natural lighting, cinematic, high quality",42,25.84,0,✅ 已应用 LLM 更新,0.45,510.36,True,537.6
-08_woman_llm,llm,data/input_img/woman.png,"A woman with sunglasses and a camera turns her head to the right, looking away from camera, natural head movement, outdoor cruise ship background, sunny day, cinematic lighting, high quality video",42,41.76,0,✅ 已应用 LLM 更新,0.43,510.12,True,553.24
+01_cat_direct_bbox_only,direct,data/input_img/cat.png,,42,,0,,0.53,510.69,True,512.44
+02_cat_direct_bbox_camera,direct,data/input_img/cat.png,,42,,0,,0.52,512.91,True,514.65
+03_cat_direct_diff_prompt,direct,data/input_img/cat.png,,42,,0,,0.56,513.27,True,515.09
+04_cat_direct_seed99,direct,data/input_img/cat.png,,99,,0,,0.64,512.81,True,514.69
+05_cat_llm,llm,data/input_img/cat.png,"A tabby cat walking from left to right, smooth movement, detailed fur, natural lighting, high quality video",42,37.81,0,✅ 已应用 LLM 更新,0.59,513.23,True,553.02
+06_cat2_llm,llm,data/input_img/cat2.png,"A tabby cat sitting on a stone, first looking to the left, then standing up and walking to the right, garden background with green plants, natural lighting, smooth motion",42,27.7,0,✅ 已应用 LLM 更新,0.63,513.88,True,543.45
+07_bear_llm,llm,data/input_img/bear.jpg,"A brown bear walking from left to right in a forest near a lake, natural lighting, cinematic, high quality",42,22.77,0,✅ 已应用 LLM 更新,0.49,512.75,True,537.18
+08_woman_llm,llm,data/input_img/woman.png,"A woman with sunglasses turns her head to the right, looking away, standing in front of a cruise ship, sunny day, blue sky, cinematic lighting, smooth motion, high quality",42,33.87,0,✅ 已应用 LLM 更新,0.53,514.13,True,549.65

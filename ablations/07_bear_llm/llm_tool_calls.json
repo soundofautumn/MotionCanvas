@@ -11,14 +11,6 @@
           "box_threshold": 0.3,
           "text_threshold": 0.25
         }
-      },
-      {
-        "id": "functions.gdino_sam_detect_point:1",
-        "name": "gdino_sam_detect_point",
-        "arguments": {
-          "query": "bear",
-          "point_method": "centroid"
-        }
       }
     ],
     "results": [
@@ -37,40 +29,6 @@
             0.68502
           ]
         }
-      },
-      {
-        "id": "functions.gdino_sam_detect_point:1",
-        "content": {
-          "ok": true,
-          "found": true,
-          "frame": 0,
-          "query": "bear",
-          "point_method": "centroid",
-          "sam_used": true,
-          "score": 0.8453121185302734,
-          "bbox_norm": [
-            0.1525,
-            0.574,
-            0.4105,
-            0.6893199999999999
-          ],
-          "point_norm": [
-            0.3212,
-            0.652
-          ],
-          "point_json": {
-            "points": [
-              {
-                "frames": {
-                  "0": [
-                    0.3212,
-                    0.652
-                  ]
-                }
-              }
-            ]
-          }
-        }
       }
     ]
   },
@@ -79,48 +37,78 @@
     "type": "tool_calls",
     "calls": [
       {
+        "id": "functions.gdino_sam_detect_point:1",
+        "name": "gdino_sam_detect_point",
+        "arguments": {
+          "query": "a bear",
+          "point_method": "centroid"
+        }
+      },
+      {
         "id": "functions.bbox_translate:2",
         "name": "bbox_translate",
         "arguments": {
           "start_frame": 0,
           "end_frame": 48,
-          "dx": 0.4,
+          "dx": 0.35,
           "dy": 0,
           "space": "norm",
           "transition": "linear"
         }
       },
       {
-        "id": "functions.points_translate:3",
-        "name": "points_translate",
-        "arguments": {
-          "start_frame": 0,
-          "end_frame": 48,
-          "dx": 0.4,
-          "dy": 0,
-          "space": "norm",
-          "transition": "linear"
-        }
-      },
-      {
-        "id": "functions.camera_zoom_linear:4",
+        "id": "functions.camera_zoom_linear:3",
         "name": "camera_zoom_linear",
         "arguments": {
           "start_frame": 0,
           "end_frame": 48,
           "start": 1.0,
-          "end": 1.2
+          "end": 1.15
         }
       },
       {
-        "id": "functions.set_generation_params:5",
+        "id": "functions.set_generation_params:4",
         "name": "set_generation_params",
         "arguments": {
-          "prompt": "A brown bear walking from left to right across a forest meadow near a lake, natural lighting, cinematic, high quality"
+          "prompt": "A brown bear walking from left to right in a forest near a lake, natural lighting, cinematic, high quality"
         }
       }
     ],
     "results": [
+      {
+        "id": "functions.gdino_sam_detect_point:1",
+        "content": {
+          "ok": true,
+          "found": true,
+          "frame": 0,
+          "query": "a bear",
+          "point_method": "centroid",
+          "sam_used": true,
+          "score": 0.9165468811988831,
+          "bbox_norm": [
+            0.1519,
+            0.5667,
+            0.4152,
+            0.68502
+          ],
+          "point_norm": [
+            0.3194,
+            0.6521
+          ],
+          "point_json": {
+            "points": [
+              {
+                "frames": {
+                  "0": [
+                    0.3194,
+                    0.6521
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      },
       {
         "id": "functions.bbox_translate:2",
         "content": {
@@ -137,7 +125,7 @@
                     0.68502
                   ],
                   "48": [
-                    0.9519,
+                    0.8519,
                     0.5667,
                     1.0,
                     0.685
@@ -149,7 +137,41 @@
         }
       },
       {
-        "id": "functions.points_translate:3",
+        "id": "functions.camera_zoom_linear:3",
+        "content": {
+          "ok": true,
+          "applied": "camera_zoom_linear"
+        }
+      },
+      {
+        "id": "functions.set_generation_params:4",
+        "content": {
+          "ok": true,
+          "applied": "set_generation_params"
+        }
+      }
+    ]
+  },
+  {
+    "round": 2,
+    "type": "tool_calls",
+    "calls": [
+      {
+        "id": "functions.points_translate:5",
+        "name": "points_translate",
+        "arguments": {
+          "start_frame": 0,
+          "end_frame": 48,
+          "dx": 0.35,
+          "dy": 0,
+          "space": "norm",
+          "transition": "linear"
+        }
+      }
+    ],
+    "results": [
+      {
+        "id": "functions.points_translate:5",
         "content": {
           "ok": true,
           "applied": "points_translate",
@@ -165,41 +187,23 @@
               {
                 "frames": {
                   "0": [
-                    0.3212,
-                    0.652
-                  ]
-                }
-              },
-              {
-                "frames": {
+                    0.3194,
+                    0.6521
+                  ],
                   "48": [
                     1.0,
-                    0.652
+                    0.6521
                   ]
                 }
               }
             ]
           }
         }
-      },
-      {
-        "id": "functions.camera_zoom_linear:4",
-        "content": {
-          "ok": true,
-          "applied": "camera_zoom_linear"
-        }
-      },
-      {
-        "id": "functions.set_generation_params:5",
-        "content": {
-          "ok": true,
-          "applied": "set_generation_params"
-        }
       }
     ]
   },
   {
-    "round": 2,
+    "round": 3,
     "type": "final_result",
     "bbox_json": {
       "objects": [
@@ -212,7 +216,7 @@
               0.68502
             ],
             "48": [
-              0.9519,
+              0.8519,
               0.5667,
               1.0,
               0.685
@@ -235,7 +239,7 @@
           },
           {
             "frame": 48,
-            "zoom": 1.2,
+            "zoom": 1.15,
             "pan": [
               0.0,
               0.0
@@ -250,22 +254,18 @@
         {
           "frames": {
             "0": [
-              0.3212,
-              0.652
-            ]
-          }
-        },
-        {
-          "frames": {
+              0.3194,
+              0.6521
+            ],
             "48": [
               1.0,
-              0.652
+              0.6521
             ]
           }
         }
       ]
     },
-    "prompt": "A brown bear walking from left to right across a forest meadow near a lake, natural lighting, cinematic, high quality",
+    "prompt": "A brown bear walking from left to right in a forest near a lake, natural lighting, cinematic, high quality",
     "gen_params": {
       "height": 480,
       "width": 832,

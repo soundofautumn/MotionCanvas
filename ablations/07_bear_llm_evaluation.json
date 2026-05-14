@@ -1,16 +1,16 @@
 {
   "experiment": "07_bear_llm",
-  "prompt": "A brown bear walking from left to right across a forest meadow near a lake, natural lighting, cinematic, high quality",
+  "prompt": "A brown bear walking from left to right in a forest near a lake, natural lighting, cinematic, high quality",
   "seed": 42,
   "mode": "llm",
   "image": "data/input_img/bear.jpg",
   "quality": {
-    "ImageReward": 1.211311,
-    "Aesthetic": 5.779549,
-    "PickScore": 0.210147,
-    "CLIP": 0.333096,
-    "HPSv2": 0.245546,
-    "HPSv2.1": 0.164067,
-    "MPS": 9.095077
+    "ImageReward": 0.921339,
+    "Aesthetic": 5.339455,
+    "PickScore": 0.201693,
+    "CLIP": 0.343409,
+    "HPSv2": 0.244697,
+    "HPSv2.1": 0.168308,
+    "MPS": 8.344519
   }
 }

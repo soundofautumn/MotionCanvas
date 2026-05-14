@@ -5,6 +5,6 @@
   },
   {
     "role": "assistant",
-    "content": "已完成设置！以下是配置摘要：\n\n**物体运动**：\n- 猫从画面左侧（x≈0.09）向右行走至画面中间偏右（x≈0.59）\n- 运动轨迹覆盖全部 49 帧，平滑线性移动\n\n**相机**：\n- 保持静止（无 camera 关键帧）\n\n**生成参数**：\n- Prompt: \"A cat walking on a soft pink cushion, realistic fur texture, gray and white tabby cat, indoor natural lighting, smooth movement, high quality\"\n- 其他参数保持默认（480x832, 49帧, 15fps）\n\n现在可以开始生成视频了！"
+    "content": "已完成所有设置！现在猫会从左向右走动，相机保持静止。\n\n**设置摘要：**\n- **Prompt**: \"A tabby cat walking from left to right, smooth movement, detailed fur, natural lighting, high quality video\"\n- **物体运动**: 猫从画面左侧（x≈0.09）向右移动约25%画面宽度（到x≈0.59），形成自然的走路动作\n- **相机**: 保持静止（无 camera 运动）\n- **帧数**: 49帧（约3.3秒视频）\n\n现在可以生成视频了！"
   }
 ]

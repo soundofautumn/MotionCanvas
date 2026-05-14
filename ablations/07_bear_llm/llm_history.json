@@ -5,6 +5,6 @@
   },
   {
     "role": "assistant",
-    "content": "已完成所有设置！\n\n**配置摘要：**\n- 🐻 **熊的运动**：从左向右移动（bbox 从 x=0.15 移动到 x=0.95）\n- 📍 **轨迹点**：从画面左侧 (0.32, 0.65) 移动到右侧边缘\n- 🔍 **相机**：从 1.0x 缓慢放大到 1.2x\n- 📝 **Prompt**：\"A brown bear walking from left to right across a forest meadow near a lake, natural lighting, cinematic, high quality\"\n\n视频将展示一只棕熊在森林湖边草地上从左向右行走，同时相机轻微推进放大。"
+    "content": "已完成所有设置！现在可以生成视频了。\n\n**配置总结：**\n- 🐻 **熊的运动**：从画面左侧 (x=0.15) 走到右侧 (x=0.85)，水平移动约 35% 画面宽度\n- 📷 **相机效果**：从 1.0x 缓慢放大到 1.15x，营造温和的推进感\n- 📝 **Prompt**：\"A brown bear walking from left to right in a forest near a lake, natural lighting, cinematic, high quality\"\n- 🎯 **轨迹点**：熊的中心点从 [0.32, 0.65] 移动到 [1.0, 0.65]\n\n点击生成按钮即可开始制作视频！"
   }
 ]

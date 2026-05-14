@@ -1,5 +1,5 @@
-experiment,mode,seed,prompt,Aesthetic,CLIP,HPSv2,HPSv2.1,ImageReward,MPS,PickScore
-05_cat_llm,llm,42,"A cat walking on a soft pink cushion, realistic fur texture, gray and white tabby cat, indoor natural lighting, smooth movement, high quality",4.65222,0.283381,0.244748,0.187654,-0.685404,15.403524,0.20361
-06_cat2_llm,llm,42,"A tabby cat sitting on a stone in a garden, looking to the left, then standing up and walking to the right, natural movement, detailed fur, outdoor scene with green plants and trees, cinematic lighting, high quality",5.129297,0.327832,0.255306,0.190341,1.066565,12.700533,0.205451
-07_bear_llm,llm,42,"A brown bear walking from left to right across a forest meadow near a lake, natural lighting, cinematic, high quality",5.779549,0.333096,0.245546,0.164067,1.211311,9.095077,0.210147
-08_woman_llm,llm,42,"A woman with sunglasses and a camera turns her head to the right, looking away from camera, natural head movement, outdoor cruise ship background, sunny day, cinematic lighting, high quality video",5.227041,0.374167,0.235765,0.204545,1.303846,8.557788,0.188659
+experiment,mode,seed,prompt,trajectory_preview,Aesthetic,CLIP,HPSv2,HPSv2.1,ImageReward,MPS,PickScore
+05_cat_llm,llm,42,"A tabby cat walking from left to right, smooth movement, detailed fur, natural lighting, high quality video",,4.546748,0.248058,0.25459,0.187958,-1.990156,7.201719,0.195258
+06_cat2_llm,llm,42,"A tabby cat sitting on a stone, first looking to the left, then standing up and walking to the right, garden background with green plants, natural lighting, smooth motion",,5.042056,0.30892,0.253389,0.193351,1.122234,8.305056,0.204465
+07_bear_llm,llm,42,"A brown bear walking from left to right in a forest near a lake, natural lighting, cinematic, high quality",,5.339455,0.343409,0.244697,0.168308,0.921339,8.344519,0.201693
+08_woman_llm,llm,42,"A woman with sunglasses turns her head to the right, looking away, standing in front of a cruise ship, sunny day, blue sky, cinematic lighting, smooth motion, high quality",,5.232248,0.357364,0.230202,0.182998,0.526666,8.149093,0.189398

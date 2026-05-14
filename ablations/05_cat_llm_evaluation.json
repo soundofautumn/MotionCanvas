@@ -1,16 +1,16 @@
 {
   "experiment": "05_cat_llm",
-  "prompt": "A cat walking on a soft pink cushion, realistic fur texture, gray and white tabby cat, indoor natural lighting, smooth movement, high quality",
+  "prompt": "A tabby cat walking from left to right, smooth movement, detailed fur, natural lighting, high quality video",
   "seed": 42,
   "mode": "llm",
   "image": "data/input_img/cat.png",
   "quality": {
-    "ImageReward": -0.685404,
-    "Aesthetic": 4.65222,
-    "PickScore": 0.20361,
-    "CLIP": 0.283381,
-    "HPSv2": 0.244748,
-    "HPSv2.1": 0.187654,
-    "MPS": 15.403524
+    "ImageReward": -1.990156,
+    "Aesthetic": 4.546748,
+    "PickScore": 0.195258,
+    "CLIP": 0.248058,
+    "HPSv2": 0.25459,
+    "HPSv2.1": 0.187958,
+    "MPS": 7.201719
   }
 }

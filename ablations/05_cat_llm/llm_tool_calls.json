@@ -11,14 +11,6 @@
           "box_threshold": 0.3,
           "text_threshold": 0.25
         }
-      },
-      {
-        "id": "functions.gdino_sam_detect_point:1",
-        "name": "gdino_sam_detect_point",
-        "arguments": {
-          "query": "cat body",
-          "point_method": "centroid"
-        }
       }
     ],
     "results": [
@@ -37,7 +29,32 @@
             0.7209
           ]
         }
+      }
+    ]
+  },
+  {
+    "round": 1,
+    "type": "tool_calls",
+    "calls": [
+      {
+        "id": "functions.gdino_sam_detect_point:1",
+        "name": "gdino_sam_detect_point",
+        "arguments": {
+          "query": "cat body",
+          "point_method": "centroid",
+          "box_threshold": 0.3,
+          "text_threshold": 0.25
+        }
       },
+      {
+        "id": "functions.set_generation_params:2",
+        "name": "set_generation_params",
+        "arguments": {
+          "prompt": "A tabby cat walking from left to right, smooth movement, detailed fur, natural lighting, high quality video"
+        }
+      }
+    ],
+    "results": [
       {
         "id": "functions.gdino_sam_detect_point:1",
         "content": {
@@ -71,15 +88,22 @@
             ]
           }
         }
+      },
+      {
+        "id": "functions.set_generation_params:2",
+        "content": {
+          "ok": true,
+          "applied": "set_generation_params"
+        }
       }
     ]
   },
   {
-    "round": 1,
+    "round": 2,
     "type": "tool_calls",
     "calls": [
       {
-        "id": "functions.bbox_translate:2",
+        "id": "functions.bbox_translate:3",
         "name": "bbox_translate",
         "arguments": {
           "start_frame": 0,
@@ -91,7 +115,7 @@
         }
       },
       {
-        "id": "functions.points_translate:3",
+        "id": "functions.points_translate:4",
         "name": "points_translate",
         "arguments": {
           "start_frame": 0,
@@ -101,18 +125,11 @@
           "space": "norm",
           "transition": "linear"
         }
-      },
-      {
-        "id": "functions.set_generation_params:4",
-        "name": "set_generation_params",
-        "arguments": {
-          "prompt": "A cat walking on a soft pink cushion, realistic fur texture, gray and white tabby cat, indoor natural lighting, smooth movement, high quality"
-        }
       }
     ],
     "results": [
       {
-        "id": "functions.bbox_translate:2",
+        "id": "functions.bbox_translate:3",
         "content": {
           "ok": true,
           "applied": "bbox_translate",
@@ -139,7 +156,7 @@
         }
       },
       {
-        "id": "functions.points_translate:3",
+        "id": "functions.points_translate:4",
         "content": {
           "ok": true,
           "applied": "points_translate",
@@ -157,11 +174,7 @@
                   "0": [
                     0.4888,
                     0.4096
-                  ]
-                }
-              },
-              {
-                "frames": {
+                  ],
                   "48": [
                     0.9888,
                     0.4096
@@ -171,18 +184,11 @@
             ]
           }
         }
-      },
-      {
-        "id": "functions.set_generation_params:4",
-        "content": {
-          "ok": true,
-          "applied": "set_generation_params"
-        }
       }
     ]
   },
   {
-    "round": 2,
+    "round": 3,
     "type": "final_result",
     "bbox_json": {
       "objects": [
@@ -212,11 +218,7 @@
             "0": [
               0.4888,
               0.4096
-            ]
-          }
-        },
-        {
-          "frames": {
+            ],
             "48": [
               0.9888,
               0.4096
@@ -225,7 +227,7 @@
         }
       ]
     },
-    "prompt": "A cat walking on a soft pink cushion, realistic fur texture, gray and white tabby cat, indoor natural lighting, smooth movement, high quality",
+    "prompt": "A tabby cat walking from left to right, smooth movement, detailed fur, natural lighting, high quality video",
     "gen_params": {
       "height": 480,
       "width": 832,

@@ -1,16 +1,16 @@
 {
   "experiment": "06_cat2_llm",
-  "prompt": "A tabby cat sitting on a stone in a garden, looking to the left, then standing up and walking to the right, natural movement, detailed fur, outdoor scene with green plants and trees, cinematic lighting, high quality",
+  "prompt": "A tabby cat sitting on a stone, first looking to the left, then standing up and walking to the right, garden background with green plants, natural lighting, smooth motion",
   "seed": 42,
   "mode": "llm",
   "image": "data/input_img/cat2.png",
   "quality": {
-    "ImageReward": 1.066565,
-    "Aesthetic": 5.129297,
-    "PickScore": 0.205451,
-    "CLIP": 0.327832,
-    "HPSv2": 0.255306,
-    "HPSv2.1": 0.190341,
-    "MPS": 12.700533
+    "ImageReward": 1.122234,
+    "Aesthetic": 5.042056,
+    "PickScore": 0.204465,
+    "CLIP": 0.30892,
+    "HPSv2": 0.253389,
+    "HPSv2.1": 0.193351,
+    "MPS": 8.305056
   }
 }

@@ -1,5 +1,5 @@
 {
-  "prompt": "A cat walking on a soft pink cushion, realistic fur texture, gray and white tabby cat, indoor natural lighting, smooth movement, high quality",
+  "prompt": "A tabby cat walking from left to right, smooth movement, detailed fur, natural lighting, high quality video",
   "has_bbox": true,
   "has_camera": false,
   "has_point": true,
@@ -31,11 +31,7 @@
           "0": [
             0.4888,
             0.4096
-          ]
-        }
-      },
-      {
-        "frames": {
+          ],
           "48": [
             0.9888,
             0.4096

@@ -1,5 +1,5 @@
 {
-  "prompt": "A brown bear walking from left to right across a forest meadow near a lake, natural lighting, cinematic, high quality",
+  "prompt": "A brown bear walking from left to right in a forest near a lake, natural lighting, cinematic, high quality",
   "has_bbox": true,
   "has_camera": true,
   "has_point": true,
@@ -14,7 +14,7 @@
             0.68502
           ],
           "48": [
-            0.9519,
+            0.8519,
             0.5667,
             1.0,
             0.685
@@ -37,7 +37,7 @@
         },
         {
           "frame": 48,
-          "zoom": 1.2,
+          "zoom": 1.15,
           "pan": [
             0.0,
             0.0
@@ -52,16 +52,12 @@
       {
         "frames": {
           "0": [
-            0.3212,
-            0.652
-          ]
-        }
-      },
-      {
-        "frames": {
+            0.3194,
+            0.6521
+          ],
           "48": [
             1.0,
-            0.652
+            0.6521
           ]
         }
       }
