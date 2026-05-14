@@ -109,9 +109,12 @@ def compute_tracks(
         )
 
     # pred_tracks: (1, T, N, 2) 像素坐标
-    # pred_visibility: (1, T, N, 1)
+    # pred_visibility: (1, T, N) 或 (1, T, N, 1)
     tracks = pred_tracks[0].cpu().numpy()  # (T, N, 2)
-    visibility = pred_visibility[0, :, :, 0].cpu().numpy()  # (T, N)
+    if pred_visibility.ndim == 4:
+        visibility = pred_visibility[0, :, :, 0].cpu().numpy()
+    else:
+        visibility = pred_visibility[0].cpu().numpy()  # (T, N)
 
     return tracks, visibility
 
