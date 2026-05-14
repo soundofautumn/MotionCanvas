@@ -659,7 +659,7 @@ def _point_state_to_json(point_state):
         for d, ti, pi in candidates:
             if ti in used_tracks or pi in used_pts:
                 continue
-            if d > 0.04:
+            if d > 2.0:
                 continue
             tracks[ti][fi] = tuple(pts[pi])
             used_tracks.add(ti)

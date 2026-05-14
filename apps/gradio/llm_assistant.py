@@ -806,6 +806,13 @@ updates 语义（可选，用于直接覆盖字段）：
     3. 处理相机运动（如果有必要）。
     4. 设置生成参数（prompt 等）。
 - **不要** 在只设了第 0 帧的 bbox/point 后就结束——没有运动轨迹，视频就是静止的。
+
+运动幅度约束（非常重要）：
+- **bbox_translate / points_translate 的 dx/dy 必须合理**，推荐范围：
+    - norm 坐标：dx/dy 推荐 **0.05 ~ 0.3**（即画面尺寸的 5%~30%），**最大不超过 0.5**。太大的位移（如 dx=0.8）会导致物体完全移出画面。
+    - px 像素坐标：dx/dy 推荐 **10 ~ 100 像素**，最大不超过 **200 像素**。
+- 如果用户没有指定具体运动幅度，优先使用 **较小的幅度**（如 dx=0.15），宁可运动不足也不要运动过度。
+- 对于跨越帧数较少的区间（如 start_frame=0, end_frame=10），dx/dy 应更小（如 0.05~0.1），因为插值帧数少，大幅运动会显得突兀。
 - **不要** 调用无意义的 camera_set（例如 zoom=1.0, pan=[0,0], rotation=0），这浪费轮次且没有效果。
 - 如果用户没说具体的运动方向/幅度，根据 prompt 内容（如 "walking"、"jumping"、"flying"）合理推断一个运动轨迹。
 
@@ -1038,7 +1045,7 @@ def _point_state_to_json(point_state: Dict[str, Any]) -> str:
         for d, ti, pi in candidates:
             if ti in used_tracks or pi in used_pts:
                 continue
-            if d > 0.04:
+            if d > 2.0:
                 continue
             tracks[ti][fi] = tuple(pts[pi])
             used_tracks.add(ti)
@@ -1681,8 +1688,8 @@ def get_motion_tools() -> List[Dict[str, Any]]:
                     "properties": {
                         "start_frame": {"type": "integer", "description": "Start frame index."},
                         "end_frame": {"type": "integer", "description": "End frame index."},
-                        "dx": {"type": "number", "description": "Translation in x (norm or px, depends on space)."},
-                        "dy": {"type": "number", "description": "Translation in y (norm or px, depends on space)."},
+                        "dx": {"type": "number", "description": "Translation in x. Recommended range: norm=0.05~0.3 (max 0.5), px=10~100 (max 200)."},
+                        "dy": {"type": "number", "description": "Translation in y. Recommended range: norm=0.05~0.3 (max 0.5), px=10~100 (max 200)."},
                         "space": {"type": "string", "enum": ["norm", "px"], "description": "Coordinate space: norm=[0,1] relative to image, px=absolute pixels. Default norm."},
                         "transition": {
                             "type": "string",
@@ -1720,8 +1727,8 @@ def get_motion_tools() -> List[Dict[str, Any]]:
                     "properties": {
                         "start_frame": {"type": "integer", "description": "Start frame index."},
                         "end_frame": {"type": "integer", "description": "End frame index."},
-                        "dx": {"type": "number", "description": "Translation in x (norm or px, depends on space)."},
-                        "dy": {"type": "number", "description": "Translation in y (norm or px, depends on space)."},
+                        "dx": {"type": "number", "description": "Translation in x. Recommended range: norm=0.05~0.3 (max 0.5), px=10~100 (max 200)."},
+                        "dy": {"type": "number", "description": "Translation in y. Recommended range: norm=0.05~0.3 (max 0.5), px=10~100 (max 200)."},
                         "space": {"type": "string", "enum": ["norm", "px"], "description": "Coordinate space: norm=[0,1] relative to image, px=absolute pixels. Default norm."},
                         "transition": {
                             "type": "string",
