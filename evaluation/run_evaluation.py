@@ -3,7 +3,9 @@ import json
 import sys
 from pathlib import Path
 from PIL import Image
-from typing import List
+from typing import List, Optional
+
+import torch
 
 from .image_quality_metrics import ImageQualityEvaluator, uniform_sample
 from .reference_metrics import ReferenceMetrics
@@ -29,6 +31,10 @@ def evaluate_video(
     sample_n: int = 8,
     device: str = "cuda",
     quality_models: List[str] = None,
+    trajectory_preview: Optional[str] = None,
+    fps: int = 15,
+    trail_length: int = 8,
+    subsample_tracks: int = 3,
 ) -> dict:
     frames = load_video_frames(video_path, max_frames=-1)
     sampled = uniform_sample(frames, n=sample_n)
@@ -50,6 +56,41 @@ def evaluate_video(
         for name, score in results["reference"].items():
             print(f"  {name}: {score:.4f}")
 
+    # ── 轨迹预览视频 ──
+    if trajectory_preview:
+        print(f"Generating trajectory preview video...")
+        try:
+            from .trajectory_preview import (
+                load_cotracker,
+                compute_tracks,
+                render_trajectory_preview,
+                save_trajectory_preview_video,
+            )
+
+            cotracker = load_cotracker(device=device)
+            if cotracker is not None:
+                tracks, visibility = compute_tracks(cotracker, frames, device=device)
+                preview_frames = render_trajectory_preview(
+                    frames,
+                    tracks=tracks,
+                    visibility=visibility,
+                    trail_length=trail_length,
+                    subsample_tracks=subsample_tracks,
+                )
+                save_trajectory_preview_video(
+                    preview_frames, trajectory_preview, fps=fps
+                )
+                results["trajectory_preview"] = str(trajectory_preview)
+                del cotracker
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            else:
+                print("  [SKIP] CoTracker 不可用，跳过轨迹预览")
+        except Exception as e:
+            print(f"  [ERROR] 轨迹预览生成失败: {e}")
+            import traceback
+            traceback.print_exc()
+
     return results
 
 
@@ -63,6 +104,10 @@ def main():
     parser.add_argument("--models", nargs="+", choices=["ImageReward", "Aesthetic", "PickScore", "CLIP", "HPSv2", "HPSv2.1", "MPS"],
                         help="Quality models to use (default: all)")
     parser.add_argument("--output", help="Path to save JSON results")
+    parser.add_argument("--trajectory_preview", help="Path to save trajectory preview video (e.g. trajectory_preview.mp4)")
+    parser.add_argument("--fps", type=int, default=15, help="FPS for trajectory preview video (default: 15)")
+    parser.add_argument("--trail_length", type=int, default=8, help="Trajectory trail length in frames (default: 8)")
+    parser.add_argument("--subsample_tracks", type=int, default=3, help="Subsample tracks by this factor (default: 3)")
     args = parser.parse_args()
 
     results = evaluate_video(
@@ -72,6 +117,10 @@ def main():
         sample_n=args.sample,
         device=args.device,
         quality_models=args.models,
+        trajectory_preview=args.trajectory_preview,
+        fps=args.fps,
+        trail_length=args.trail_length,
+        subsample_tracks=args.subsample_tracks,
     )
 
     if args.output:

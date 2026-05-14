@@ -17,6 +17,9 @@
 
   # 输出到指定汇总文件
   python evaluation/evaluate_ablations.py --summary results.json
+
+  # 启用轨迹预览视频（使用 CoTracker 追踪并渲染轨迹叠加）
+  python evaluation/evaluate_ablations.py --trajectory_preview --trail_length 10 --subsample_tracks 3
 """
 
 import argparse
@@ -59,6 +62,10 @@ def evaluate_ablation(
     quality_models: list = None,
     reference_dir: str = None,
     sample_n: int = 8,
+    trajectory_preview: bool = False,
+    trail_length: int = 8,
+    subsample_tracks: int = 3,
+    fps: int = 15,
 ) -> dict:
     """评估单个消融实验目录"""
     name = exp_dir.name
@@ -133,6 +140,42 @@ def evaluate_ablation(
         else:
             print(f"  [WARN] 参考图未找到: {ref_path}，跳过参考指标")
 
+    # ── 轨迹预览视频 ──
+    if trajectory_preview:
+        traj_out = exp_dir / "trajectory_preview.mp4"
+        print(f"  Generating trajectory preview video...")
+        t0 = time.time()
+        try:
+            from evaluation.trajectory_preview import (
+                load_cotracker,
+                compute_tracks,
+                render_trajectory_preview,
+                save_trajectory_preview_video,
+            )
+            import torch
+            cotracker = load_cotracker(device=device)
+            if cotracker is not None:
+                tracks, visibility = compute_tracks(cotracker, frames, device=device)
+                preview_frames = render_trajectory_preview(
+                    frames,
+                    tracks=tracks,
+                    visibility=visibility,
+                    trail_length=trail_length,
+                    subsample_tracks=subsample_tracks,
+                )
+                save_trajectory_preview_video(preview_frames, str(traj_out), fps=fps)
+                results["trajectory_preview"] = str(traj_out)
+                del cotracker
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                print(f"  Trajectory preview done ({time.time()-t0:.1f}s)")
+            else:
+                print(f"  [SKIP] CoTracker 不可用，跳过轨迹预览")
+        except Exception as e:
+            print(f"  [ERROR] 轨迹预览生成失败: {e}")
+            import traceback
+            traceback.print_exc()
+
     return results
 
 
@@ -170,6 +213,22 @@ def main():
         default=str(project_root / "ablation_results" / "evaluation_results.csv"),
         help="汇总结果 CSV 路径 (默认: ablation_results/evaluation_results.csv)",
     )
+    parser.add_argument(
+        "--trajectory_preview", action="store_true",
+        help="启用轨迹预览视频生成（使用 CoTracker 追踪点轨迹并叠加渲染）",
+    )
+    parser.add_argument(
+        "--trail_length", type=int, default=8,
+        help="轨迹拖尾长度（帧数，默认: 8）",
+    )
+    parser.add_argument(
+        "--subsample_tracks", type=int, default=3,
+        help="轨迹点下采样因子（默认: 3，每 3 个点取 1 个）",
+    )
+    parser.add_argument(
+        "--traj_fps", type=int, default=15,
+        help="轨迹预览视频帧率（默认: 15）",
+    )
     args = parser.parse_args()
 
     ablations_dir = Path(args.ablations_dir)
@@ -194,6 +253,10 @@ def main():
         print(f"参考指标: 开启 (参考图目录: {args.reference_dir})")
     else:
         print(f"参考指标: 关闭")
+    if args.trajectory_preview:
+        print(f"轨迹预览: 开启 (拖尾={args.trail_length}, 下采样={args.subsample_tracks}, fps={args.traj_fps})")
+    else:
+        print(f"轨迹预览: 关闭")
     print()
 
     # 逐个评估
@@ -205,6 +268,10 @@ def main():
             quality_models=models_to_use,
             reference_dir=args.reference_dir,
             sample_n=args.sample,
+            trajectory_preview=args.trajectory_preview,
+            trail_length=args.trail_length,
+            subsample_tracks=args.subsample_tracks,
+            fps=args.traj_fps,
         )
         if result is not None:
             all_results.append(result)
@@ -223,6 +290,9 @@ def main():
         "models": args.models or "all",
         "sample_n": args.sample,
         "has_reference": args.reference_dir is not None,
+        "has_trajectory_preview": args.trajectory_preview,
+        "trail_length": args.trail_length,
+        "subsample_tracks": args.subsample_tracks,
         "results": all_results,
     }
     summary_path = Path(args.summary)
@@ -241,7 +311,7 @@ def main():
             k for r in all_results if "reference" in r
             for k in r["reference"]
         ))
-        header = ["experiment", "mode", "seed", "prompt"] + quality_names + ref_names
+        header = ["experiment", "mode", "seed", "prompt", "trajectory_preview"] + quality_names + ref_names
         w = csv.writer(f)
         w.writerow(header)
         for r in all_results:
@@ -250,6 +320,7 @@ def main():
                 r.get("mode", ""),
                 r.get("seed", ""),
                 r.get("prompt", ""),
+                r.get("trajectory_preview", ""),
             ]
             row += [r.get("quality", {}).get(n, "") for n in quality_names]
             row += [r.get("reference", {}).get(n, "") for n in ref_names]
