@@ -263,3 +263,252 @@ def save_trajectory_preview_video(
     save_video(frames, output_path, fps=fps, quality=quality)
     print(f"  轨迹预览视频已保存: {output_path}")
     return output_path
+
+
+# ═══════════════════════════════════════════════════════════════
+#  从保存的 bbox_mask.pt / track_video.pt 生成预览
+# ═══════════════════════════════════════════════════════════════
+
+_BBOX_COLORS = [
+    (255, 80, 80),    # 红
+    (80, 255, 80),    # 绿
+    (80, 130, 255),   # 蓝
+]
+
+
+def _find_bbox_from_mask(mask_slice: torch.Tensor) -> Optional[Tuple[int, int, int, int]]:
+    """从单帧单通道的 mask (H, W) 中提取非零区域的 bounding box。
+
+    Returns:
+        (x1, y1, x2, y2) 或 None（无有效区域）。
+    """
+    non_zero = torch.nonzero(mask_slice > 0)
+    if non_zero.shape[0] == 0:
+        return None
+    y_min = int(non_zero[:, 0].min().item())
+    y_max = int(non_zero[:, 0].max().item())
+    x_min = int(non_zero[:, 1].min().item())
+    x_max = int(non_zero[:, 1].max().item())
+    return x_min, y_min, x_max, y_max
+
+
+def render_from_bbox_mask(
+    frames: List[Image.Image],
+    bbox_mask: torch.Tensor,
+    colors: Optional[List[Tuple[int, int, int]]] = None,
+    line_width: int = 3,
+    fill_alpha: float = 0.15,
+    show_label: bool = True,
+) -> List[Image.Image]:
+    """在视频帧上叠加 bbox_mask 中物体区域的边框可视化。
+
+    `bbox_mask.pt` 是 `build_bbox_mask_from_json_str` 的输出，
+    形状为 `(1, 3, T, H, W)`，值域约 [-1, 1]（>0 表示物体区域）。
+    每个 channel 对应一个物体，逐帧插值得到平滑的 bbox 运动。
+
+    Args:
+        frames: 原始视频帧 (RGB PIL Image 列表)。
+        bbox_mask: (1, 3, T, H, W) 张量。
+        colors: 每个物体的颜色列表，默认使用红/绿/蓝。
+        line_width: 边框线宽（像素）。
+        fill_alpha: 半透明填充的 alpha 值。
+        show_label: 是否在边框左上角显示物体编号。
+
+    Returns:
+        渲染后的 RGB PIL Image 列表。
+    """
+    if colors is None:
+        colors = _BBOX_COLORS
+
+    T = len(frames)
+    # bbox_mask: (1, 3, T, H, W) -> (3, T, H, W)
+    mask = bbox_mask.squeeze(0)
+    n_channels = min(mask.shape[0], len(colors))
+
+    # 预计算每帧每个物体的 bbox
+    per_frame_bboxes: List[List[Optional[Tuple[int, int, int, int]]]] = []
+    for t in range(T):
+        frame_bboxes: List[Optional[Tuple[int, int, int, int]]] = []
+        for c in range(n_channels):
+            bbox = _find_bbox_from_mask(mask[c, t])
+            frame_bboxes.append(bbox)
+        per_frame_bboxes.append(frame_bboxes)
+
+    rendered: List[Image.Image] = []
+    for t in range(T):
+        # 转 RGBA 以支持半透明绘制
+        frame_copy = frames[t].convert("RGBA").copy()
+        draw = ImageDraw.Draw(frame_copy)
+
+        for obj_idx, bbox in enumerate(per_frame_bboxes[t]):
+            if bbox is None:
+                continue
+            x1, y1, x2, y2 = bbox
+            color = colors[obj_idx % len(colors)]
+            fill_color = color + (int(255 * fill_alpha),)
+
+            # 半透明填充
+            draw.rectangle([x1, y1, x2, y2], fill=fill_color, outline=None)
+            # 实线边框
+            draw.rectangle([x1, y1, x2, y2], outline=color, width=line_width)
+
+            # 标签
+            if show_label:
+                label = f"Obj {obj_idx + 1}"
+                left, top, right, bottom = draw.textbbox((0, 0), label)
+                tw = right - left
+                th = bottom - top
+                label_bg_color = color + (200,)
+                draw.rectangle(
+                    [x1, y1 - th - 4, x1 + tw + 6, y1],
+                    fill=label_bg_color,
+                )
+                draw.text((x1 + 3, y1 - th - 2), label, fill="white")
+
+        # 转回 RGB
+        rendered.append(frame_copy.convert("RGB"))
+
+    return rendered
+
+
+def render_track_video_heatmap(
+    frames: List[Image.Image],
+    track_video: torch.Tensor,
+    alpha: float = 0.35,
+    colormap: str = "viridis",
+) -> List[Image.Image]:
+    """将 track_video 特征图的激活强度可视化为热力图叠加层。
+
+    `track_video.pt` 是 `build_track_video_from_tracks` 输出的特征图，
+    形状为 `(1, C, T', H', W')`（C=64, T'≈T/4, H'=H/8, W'=W/8）。
+    通过对 channel 维度求 norm 得到激活强度，再上采样到原始分辨率。
+
+    Args:
+        frames: 原始视频帧 (RGB PIL Image 列表)。
+        track_video: (1, C, T', H', W') 张量。
+        alpha: 热力图叠加透明度。
+        colormap: matplotlib colormap 名称（'viridis', 'jet', 'plasma' 等）。
+
+    Returns:
+        渲染后的 RGB PIL Image 列表。
+    """
+    import torch.nn.functional as F
+
+    T = len(frames)
+    H, W = frames[0].height, frames[0].width
+
+    # (1, C, T', H', W') -> 沿 channel 求 norm -> (T', H', W')
+    activation = track_video.squeeze(0).norm(dim=0)  # (T', H', W')
+
+    # 归一化到 [0, 1]
+    act_min = activation.min()
+    act_max = activation.max()
+    if act_max > act_min:
+        activation = (activation - act_min) / (act_max - act_min)
+    else:
+        activation = torch.zeros_like(activation)
+
+    # Resample 到原始时间/空间分辨率
+    T_prime, H_prime, W_prime = activation.shape
+    act_5d = activation.unsqueeze(0).unsqueeze(0)  # (1, 1, T', H', W')
+    act_5d = F.interpolate(
+        act_5d, size=(T, H, W), mode="trilinear", align_corners=False,
+    )
+    act_map = act_5d.squeeze().cpu().numpy()  # (T, H, W)
+
+    # 加载 matplotlib colormap
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.cm as cm
+
+    cmap = cm.get_cmap(colormap)
+
+    rendered: List[Image.Image] = []
+    for t in range(T):
+        frame = frames[t].convert("RGBA").copy()
+
+        # 当前帧的激活图 (H, W)
+        heat = act_map[t]
+        heat_rgba = (cmap(heat, alpha=alpha) * 255).astype(np.uint8)  # (H, W, 4)
+        heat_img = Image.fromarray(heat_rgba, "RGBA")
+
+        # 叠加到原帧（heat_img 的 alpha 通道控制透明度）
+        frame.alpha_composite(heat_img)
+        rendered.append(frame.convert("RGB"))
+
+    return rendered
+
+
+def render_signals_preview(
+    frames: List[Image.Image],
+    bbox_mask_path: Optional[str] = None,
+    track_video_path: Optional[str] = None,
+    output_path: Optional[str] = None,
+    fps: int = 15,
+    quality: int = 8,
+    show_bbox: bool = True,
+    show_heatmap: bool = True,
+    bbox_line_width: int = 3,
+    heatmap_alpha: float = 0.35,
+    heatmap_colormap: str = "viridis",
+) -> List[Image.Image]:
+    """从保存的 bbox_mask.pt / track_video.pt 加载信号并渲染预览。
+
+    这是评估流程中替代 CoTracker 轨迹追踪的轻量预览方式：
+    - bbox_mask.pt → 绘制物体边界框（反映 bbox 关键帧的运动）
+    - track_video.pt → 绘制特征激活热力图（反映轨迹信号强度）
+
+    Args:
+        frames: 原始视频帧列表。
+        bbox_mask_path: bbox_mask.pt 路径（可选）。
+        track_video_path: track_video.pt 路径（可选）。
+        output_path: 可选，预览视频保存路径。
+        fps: 预览视频帧率。
+        quality: 视频质量。
+        show_bbox: 是否显示 bbox 框。
+        show_heatmap: 是否显示热力图。
+        bbox_line_width: bbox 边框宽度。
+        heatmap_alpha: 热力图透明度。
+        heatmap_colormap: 热力图 colormap。
+
+    Returns:
+        渲染后的帧列表。
+    """
+    rendered = [f.convert("RGB").copy() for f in frames]
+
+    # 1. bbox_mask 可视化
+    if show_bbox and bbox_mask_path and os.path.exists(bbox_mask_path):
+        print(f"  加载 bbox_mask: {bbox_mask_path}")
+        try:
+            bbox_mask = torch.load(bbox_mask_path, map_location="cpu", weights_only=True)
+            if isinstance(bbox_mask, dict):
+                # 某些旧版本保存格式可能是 dict
+                bbox_mask = bbox_mask.get("bbox_mask", list(bbox_mask.values())[0])
+            bbox_frames = render_from_bbox_mask(
+                rendered, bbox_mask, line_width=bbox_line_width,
+            )
+            rendered = bbox_frames
+            print(f"  ✓ bbox 框可视化完成")
+        except Exception as e:
+            print(f"  [WARN] bbox_mask 可视化失败: {e}")
+
+    # 2. track_video 热力图
+    if show_heatmap and track_video_path and os.path.exists(track_video_path):
+        print(f"  加载 track_video: {track_video_path}")
+        try:
+            track_video = torch.load(track_video_path, map_location="cpu", weights_only=True)
+            if isinstance(track_video, dict):
+                track_video = track_video.get("track_video", list(track_video.values())[0])
+            heatmap_frames = render_track_video_heatmap(
+                rendered, track_video, alpha=heatmap_alpha, colormap=heatmap_colormap,
+            )
+            rendered = heatmap_frames
+            print(f"  ✓ track_video 热力图完成")
+        except Exception as e:
+            print(f"  [WARN] track_video 热力图失败: {e}")
+
+    # 3. 保存视频
+    if output_path:
+        save_trajectory_preview_video(rendered, output_path, fps=fps, quality=quality)
+
+    return rendered

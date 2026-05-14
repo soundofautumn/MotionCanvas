@@ -1,5 +1,6 @@
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from PIL import Image
@@ -35,6 +36,8 @@ def evaluate_video(
     fps: int = 15,
     trail_length: int = 8,
     subsample_tracks: int = 3,
+    bbox_mask_path: Optional[str] = None,
+    track_video_path: Optional[str] = None,
 ) -> dict:
     frames = load_video_frames(video_path, max_frames=-1)
     sampled = uniform_sample(frames, n=sample_n)
@@ -61,31 +64,50 @@ def evaluate_video(
         print(f"Generating trajectory preview video...")
         try:
             from .trajectory_preview import (
+                render_signals_preview,
                 load_cotracker,
                 compute_tracks,
                 render_trajectory_preview,
                 save_trajectory_preview_video,
             )
 
-            cotracker = load_cotracker(device=device)
-            if cotracker is not None:
-                tracks, visibility = compute_tracks(cotracker, frames, device=device)
-                preview_frames = render_trajectory_preview(
+            use_saved_pt = (bbox_mask_path and os.path.exists(bbox_mask_path)) or \
+                           (track_video_path and os.path.exists(track_video_path))
+
+            if use_saved_pt:
+                print(f"  Using saved signals (bbox_mask.pt / track_video.pt)...")
+                render_signals_preview(
                     frames,
-                    tracks=tracks,
-                    visibility=visibility,
-                    trail_length=trail_length,
-                    subsample_tracks=subsample_tracks,
-                )
-                save_trajectory_preview_video(
-                    preview_frames, trajectory_preview, fps=fps
+                    bbox_mask_path=bbox_mask_path if bbox_mask_path and os.path.exists(bbox_mask_path) else None,
+                    track_video_path=track_video_path if track_video_path and os.path.exists(track_video_path) else None,
+                    output_path=trajectory_preview,
+                    fps=fps,
+                    show_bbox=True,
+                    show_heatmap=True,
                 )
                 results["trajectory_preview"] = str(trajectory_preview)
-                del cotracker
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
+                results["trajectory_preview_mode"] = "saved_signals"
             else:
-                print("  [SKIP] CoTracker 不可用，跳过轨迹预览")
+                cotracker = load_cotracker(device=device)
+                if cotracker is not None:
+                    tracks, visibility = compute_tracks(cotracker, frames, device=device)
+                    preview_frames = render_trajectory_preview(
+                        frames,
+                        tracks=tracks,
+                        visibility=visibility,
+                        trail_length=trail_length,
+                        subsample_tracks=subsample_tracks,
+                    )
+                    save_trajectory_preview_video(
+                        preview_frames, trajectory_preview, fps=fps
+                    )
+                    results["trajectory_preview"] = str(trajectory_preview)
+                    results["trajectory_preview_mode"] = "cotracker"
+                    del cotracker
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                else:
+                    print("  [SKIP] CoTracker 不可用，跳过轨迹预览")
         except Exception as e:
             print(f"  [ERROR] 轨迹预览生成失败: {e}")
             import traceback
@@ -108,6 +130,8 @@ def main():
     parser.add_argument("--fps", type=int, default=15, help="FPS for trajectory preview video (default: 15)")
     parser.add_argument("--trail_length", type=int, default=8, help="Trajectory trail length in frames (default: 8)")
     parser.add_argument("--subsample_tracks", type=int, default=3, help="Subsample tracks by this factor (default: 3)")
+    parser.add_argument("--bbox_mask", help="Path to bbox_mask.pt (saved signal, overrides CoTracker)")
+    parser.add_argument("--track_video", help="Path to track_video.pt (saved signal, overrides CoTracker)")
     args = parser.parse_args()
 
     results = evaluate_video(
@@ -121,6 +145,8 @@ def main():
         fps=args.fps,
         trail_length=args.trail_length,
         subsample_tracks=args.subsample_tracks,
+        bbox_mask_path=args.bbox_mask,
+        track_video_path=args.track_video,
     )
 
     if args.output:

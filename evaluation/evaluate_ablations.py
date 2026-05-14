@@ -147,30 +147,57 @@ def evaluate_ablation(
         t0 = time.time()
         try:
             from evaluation.trajectory_preview import (
+                render_signals_preview,
                 load_cotracker,
                 compute_tracks,
                 render_trajectory_preview,
                 save_trajectory_preview_video,
             )
             import torch
-            cotracker = load_cotracker(device=device)
-            if cotracker is not None:
-                tracks, visibility = compute_tracks(cotracker, frames, device=device)
-                preview_frames = render_trajectory_preview(
+
+            # 优先使用已保存的 track_video.pt / bbox_mask.pt
+            bbox_mask_pt = exp_dir / "bbox_mask.pt"
+            track_video_pt = exp_dir / "track_video.pt"
+            use_saved_pt = bbox_mask_pt.exists() or track_video_pt.exists()
+
+            if use_saved_pt:
+                print(f"  Using saved signals (bbox_mask.pt / track_video.pt)...")
+                render_signals_preview(
                     frames,
-                    tracks=tracks,
-                    visibility=visibility,
-                    trail_length=trail_length,
-                    subsample_tracks=subsample_tracks,
+                    bbox_mask_path=str(bbox_mask_pt) if bbox_mask_pt.exists() else None,
+                    track_video_path=str(track_video_pt) if track_video_pt.exists() else None,
+                    output_path=str(traj_out),
+                    fps=fps,
+                    show_bbox=True,
+                    show_heatmap=True,
+                    bbox_line_width=3,
+                    heatmap_alpha=0.35,
                 )
-                save_trajectory_preview_video(preview_frames, str(traj_out), fps=fps)
                 results["trajectory_preview"] = str(traj_out)
-                del cotracker
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
+                results["trajectory_preview_mode"] = "saved_signals"
                 print(f"  Trajectory preview done ({time.time()-t0:.1f}s)")
             else:
-                print(f"  [SKIP] CoTracker 不可用，跳过轨迹预览")
+                # Fallback: CoTracker 轨迹追踪
+                print(f"  未找到已保存的 .pt 信号文件，尝试 CoTracker...")
+                cotracker = load_cotracker(device=device)
+                if cotracker is not None:
+                    tracks, visibility = compute_tracks(cotracker, frames, device=device)
+                    preview_frames = render_trajectory_preview(
+                        frames,
+                        tracks=tracks,
+                        visibility=visibility,
+                        trail_length=trail_length,
+                        subsample_tracks=subsample_tracks,
+                    )
+                    save_trajectory_preview_video(preview_frames, str(traj_out), fps=fps)
+                    results["trajectory_preview"] = str(traj_out)
+                    results["trajectory_preview_mode"] = "cotracker"
+                    del cotracker
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                    print(f"  Trajectory preview done ({time.time()-t0:.1f}s)")
+                else:
+                    print(f"  [SKIP] CoTracker 不可用，跳过轨迹预览")
         except Exception as e:
             print(f"  [ERROR] 轨迹预览生成失败: {e}")
             import traceback
