@@ -80,10 +80,6 @@ python evaluation/evaluate_ablations.py --ablations_dir ./ablation_results --mod
 # 生成轨迹预览视频（从已保存的 .pt 信号文件，纯 CPU）
 python generate_trajectory_preview.py --dir ablation_results
 
-# ===== 测试 =====
-# 运行 test（仅限 llm_assistant 纯逻辑测试，无需 GPU）
-.venv/bin/python -m pytest test/test_llm_chat.py -v
-
 # 语法检查
 .venv/bin/python -c "import py_compile; py_compile.compile('apps/gradio/llm_assistant.py', doraise=True)"
 .venv/bin/python -c "import py_compile; py_compile.compile('apps/gradio/motioncanvas.py', doraise=True)"

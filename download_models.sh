@@ -164,12 +164,18 @@ modelscope download \
 echo "[5/7] GroundingDINO 权重已缓存到本地：${GDINO_DIR}"
 
 # -----------------------------------------------
-# 5. 预下载 CoTracker 到本地缓存
+# 6. 预下载 CoTracker 到本地缓存
 # -----------------------------------------------
 echo ""
 echo "[6/7] 预下载 CoTracker (torch.hub) ..."
 mkdir -p "${COTRACKER_HUB_DIR}"
-python - <<'PY'
+export COTRACKER_HUB_DIR
+# 优先使用项目 venv 中的 Python（若存在），否则用系统 Python
+PYTHON_BIN="python"
+if [ -f ".venv/bin/python" ]; then
+    PYTHON_BIN=".venv/bin/python"
+fi
+$PYTHON_BIN - <<'PY'
 import os
 import torch
 
@@ -183,7 +189,7 @@ PY
 echo "[6/7] CoTracker 预下载完成！"
 
 # -----------------------------------------------
-# 6. 下载 SAM (Segment Anything) checkpoint
+# 7. 下载 SAM (Segment Anything) checkpoint
 # -----------------------------------------------
 echo ""
 echo "[7/7] 下载 SAM (Segment Anything) checkpoint (~2.6GB) ..."

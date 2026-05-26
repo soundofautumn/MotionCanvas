@@ -5,7 +5,7 @@
 # 使用方法（在项目根目录执行）:
 #   bash setup_from_zero.sh                    # 全流程
 #   bash setup_from_zero.sh --skip-models      # 不下载模型
-#   bash setup_from_zero.sh --source hf        # 模型从 HuggingFace 下载（Wan 用 HF，MotionCanvas 仍用 ModelScope）
+#   bash setup_from_zero.sh --python 3.10      # 指定 Python 版本
 #
 # 依赖：curl, 系统 Python 3.8+（仅用于安装 uv）
 
@@ -15,7 +15,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 SKIP_MODELS=false
-SOURCE="modelscope"
 PYTHON_VERSION=""   # 留空则用系统默认 Python
 
 while [[ $# -gt 0 ]]; do
@@ -24,17 +23,13 @@ while [[ $# -gt 0 ]]; do
             SKIP_MODELS=true
             shift
             ;;
-        --source)
-            SOURCE="$2"
-            shift 2
-            ;;
         --python)
             PYTHON_VERSION="$2"
             shift 2
             ;;
         *)
             echo "未知参数: $1"
-            echo "用法: $0 [--skip-models] [--source modelscope|hf] [--python 3.10]"
+            echo "用法: $0 [--skip-models] [--python 3.10]"
             exit 1
             ;;
     esac
@@ -49,7 +44,7 @@ echo "============================================"
 # 1. 安装 uv
 # -----------------------------------------------
 echo ""
-echo "[1/4] 安装 uv ..."
+echo "[1/5] 安装 uv ..."
 
 if command -v uv &>/dev/null; then
     echo "  uv 已存在: $(uv --version)"
@@ -69,7 +64,7 @@ fi
 # 2. 创建虚拟环境
 # -----------------------------------------------
 echo ""
-echo "[2/4] 创建虚拟环境 (.venv) ..."
+echo "[2/5] 创建虚拟环境 (.venv) ..."
 
 if [ -n "$PYTHON_VERSION" ]; then
     uv venv --python "$PYTHON_VERSION"
@@ -84,7 +79,7 @@ source .venv/bin/activate
 # 3. 安装项目依赖（可编辑模式安装）
 # -----------------------------------------------
 echo ""
-echo "[3/4] 安装项目依赖 (uv pip install -e .) ..."
+echo "[3/5] 安装项目依赖 (uv pip install -e .) ..."
 
 uv pip install -e .
 
@@ -93,10 +88,20 @@ python -c "import torch; print('  PyTorch:', torch.__version__)"
 python -c "import gradio; print('  Gradio:', gradio.__version__)"
 
 # -----------------------------------------------
-# 4. 下载模型
+# 4. 固定 setuptools 版本（pyproject.toml 的 build-system.requires
+#    仅作用于构建隔离环境，venv 中的 setuptools 需单独固定）
 # -----------------------------------------------
 echo ""
-echo "[4/4] 下载模型 ..."
+echo "[4/5] 固定 setuptools 版本 ..."
+
+uv pip install setuptools==80.10.2
+echo "  setuptools==80.10.2 ✓"
+
+# -----------------------------------------------
+# 5. 下载模型
+# -----------------------------------------------
+echo ""
+echo "[5/5] 下载模型 ..."
 
 if [ "$SKIP_MODELS" = true ]; then
     echo "  已跳过（--skip-models）。稍后手动执行: bash download_models.sh"
@@ -105,7 +110,7 @@ else
         echo "  错误: 未找到 download_models.sh"
         exit 1
     fi
-    bash download_models.sh --source "$SOURCE"
+    bash download_models.sh
 fi
 
 # -----------------------------------------------
